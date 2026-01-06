@@ -174,7 +174,7 @@ public:
 	bool							bShouldAllChildrenChunksBeSmallChunks;
 
 	// If enabled, blast will bind its own onhit logic into hit callbacks. If you need to use Blast's own impact logic, enable this
-	UPROPERTY(EditDefaultsOnly, Category = "Blast")
+	UPROPERTY(EditAnywhere, Category = "Blast")
 	bool							bBindOnHitDelegate;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blast", meta = (PinHiddenByDefault, InlineEditConditionToggle, CantUseWithExtendedSupport))
