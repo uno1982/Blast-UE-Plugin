@@ -30,7 +30,17 @@ namespace UnrealBuildTool.Rules
             //Go up two from Source/Blast
             DirectoryReference ModuleRootFolder = (new DirectoryReference(Rules.ModuleDirectory)).ParentDirectory.ParentDirectory;
             DirectoryReference EngineDirectory = new DirectoryReference(Path.GetFullPath(Rules.Target.RelativeEnginePath));
-            string BLASTLibDir = Path.Combine("$(EngineDir)", ModuleRootFolder.MakeRelativeTo(EngineDirectory), "Libraries", Rules.Target.Platform.ToString(), LibFolderName);
+            
+            // Use absolute path for Android, $(EngineDir) relative path for other platforms
+            string BLASTLibDir;
+            if (Rules.Target.Platform == UnrealTargetPlatform.Android)
+            {
+                BLASTLibDir = Path.Combine(ModuleRootFolder.FullName, "Libraries", Rules.Target.Platform.ToString(), LibFolderName);
+            }
+            else
+            {
+                BLASTLibDir = Path.Combine("$(EngineDir)", ModuleRootFolder.MakeRelativeTo(EngineDirectory), "Libraries", Rules.Target.Platform.ToString(), LibFolderName);
+            }
 
             string DLLSuffix = "";
             string DLLPrefix = "";
@@ -59,13 +69,24 @@ namespace UnrealBuildTool.Rules
             Rules.PublicDefinitions.Add(string.Format("BLAST_LIB_DLL_SUFFIX=\"{0}\"", DLLSuffix));
             Rules.PublicDefinitions.Add(string.Format("BLAST_LIB_DLL_PREFIX=\"{0}\"", DLLPrefix));
 
-            foreach (string Lib in BlastLibs)
+            if (Rules.Target.Platform == UnrealTargetPlatform.Android)
             {
-                Rules.PublicAdditionalLibraries.Add(Path.Combine(BLASTLibDir, String.Format("{0}{1}{2}", DLLPrefix, Lib, LibSuffix)));
-                
-                // Android uses static libraries, no DLL loading needed
-                if (Rules.Target.Platform != UnrealTargetPlatform.Android)
+                // For Android, use SystemLibraryPaths + SystemLibraries so libraries are
+                // placed inside the --start-group/--end-group block for proper linking
+                Rules.PublicSystemLibraryPaths.Add(BLASTLibDir);
+                foreach (string Lib in BlastLibs)
                 {
+                    // SystemLibraries expects library name without lib prefix and extension
+                    // The toolchain will add "lib" prefix and search in SystemLibraryPaths
+                    Rules.PublicSystemLibraries.Add(Lib);
+                }
+            }
+            else
+            {
+                foreach (string Lib in BlastLibs)
+                {
+                    string LibPath = Path.Combine(BLASTLibDir, String.Format("{0}{1}{2}", DLLPrefix, Lib, LibSuffix));
+                    Rules.PublicAdditionalLibraries.Add(LibPath);
                     var DllName = String.Format("{0}{1}{2}", DLLPrefix, Lib, DLLSuffix);
                     Rules.PublicDelayLoadDLLs.Add(DllName);
                     Rules.RuntimeDependencies.Add(Path.Combine(BLASTLibDir, DllName));
@@ -94,6 +115,9 @@ namespace UnrealBuildTool.Rules
             if (Target.Platform == UnrealTargetPlatform.Android)
             {
                 PublicDefinitions.Add("CAPNP_LITE=1");
+                // Fix for NvPreprocessor.h: NV_C_EXPORT is empty for Android (it only checks NV_LINUX, not NV_ANDROID)
+                // This causes C++ name mangling on API functions. Define NV_C_EXPORT before including Blast headers.
+                PublicDefinitions.Add("NV_C_EXPORT=extern \"C\"");
             }
 
             PrivateDependencyModuleNames.AddRange(
