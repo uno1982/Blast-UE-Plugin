@@ -1,6 +1,8 @@
-# Blast-UE-Plugin (UE5 Android Support)
+# Blast-UE-Plugin (UE 5.1 + Android Support)
 
-NVIDIA Blast destruction plugin for **Unreal Engine 5** with full Android ARM64 support.
+NVIDIA Blast destruction plugin for **Unreal Engine 5.1** with full Android ARM64 support.
+
+> **Branch Note**: This is the `5.1-android-support` branch, backported from UE 5.5 to UE 5.1.
 
 ## Supported Platforms
 
@@ -9,6 +11,14 @@ NVIDIA Blast destruction plugin for **Unreal Engine 5** with full Android ARM64 
 | Windows (x64) | ✅ Full | All features supported |
 | Linux (x64) | ✅ Full | All features supported |
 | Android (ARM64) | ✅ Full | Stress solver disabled (SSE intrinsics not available on ARM) |
+
+## Unreal Engine Version
+
+**This branch targets UE 5.1**. Key API changes from UE 5.5:
+- Chaos physics scene locking (custom `FScopedSceneLock_Chaos` compatibility wrapper)
+- Skeletal mesh import utilities (uses `FSkeletalMeshImportData` approach)
+- FBX importer API differences
+- Header path changes (`SkeletalMeshSceneProxy.h`, `MaterialDomain.h`, etc.)
 
 ## Installation
 
@@ -20,6 +30,21 @@ NVIDIA Blast destruction plugin for **Unreal Engine 5** with full Android ARM64 
     "Enabled": true
 }
 ```
+
+## Usage
+
+### Impact Damage
+Impact damage is **enabled by default**. When a BlastMesh actor collides with sufficient force, it will fracture.
+
+Key settings on `BlastMeshComponent`:
+- **Bind On Hit Delegate**: Enables collision-based damage (default: `true`)
+- **Impact Damage Properties**: Configure hardness, damage radius, thresholds
+
+On `BlastMesh` asset (Blast Material section):
+- **Generate Hit Events For Leaf Actors**: Enable to allow smallest chunks to continue fracturing
+
+### Hardness Tuning
+`Damage = Impulse / Hardness`. Lower hardness = easier to break. Default is 10.0.
 
 ## Android Notes
 
@@ -42,6 +67,27 @@ In `DefaultEngine.ini`, ensure ARM64 is enabled:
 [/Script/AndroidRuntimeSettings.AndroidRuntimeSettings]
 bBuildForArm64=True
 ```
+
+## UE 5.1 Backport Changes
+
+This branch includes the following compatibility changes for UE 5.1:
+
+### New Files
+- `Source/Blast/Private/BlastChaosCompat.h` - Chaos physics locking compatibility
+
+### API Compatibility Fixes
+- Header includes updated for UE 5.1 paths
+- `TBitArray::Init()` signature compatibility
+- `EAllowShrinking` enum compatibility
+- `Chaos::FConvexPtr` type compatibility
+- FBX import API (removed `bMapMorphTargetToTimeZero`, 4-arg `ImportFbxMorphTarget`)
+- `SetNumSourceModels()` API compatibility
+- `NvcVec3` struct initialization syntax
+- PSO precaching APIs removed (not available in UE 5.1)
+- `GetAcceleration()` API change
+
+### Static-to-Skeletal Mesh Conversion
+Implemented UE 5.1 compatible replacement for `FStaticToSkeletalMeshConverter::InitializeSkeletalMeshFromStaticMesh` which was added in UE 5.2+.
 
 ## Credits
 

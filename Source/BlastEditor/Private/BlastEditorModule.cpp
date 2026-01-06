@@ -699,7 +699,7 @@ public:
 
 		SkeletalMesh->SetImportedBounds(FBoxSphereBounds(MeshBounds));
 
-		SkeletalMesh->SetNumSourceModels(0);
+		SkeletalMesh->ResetLODInfo();
 		SkeletalMesh->AddLODInfo();
 		TArray<FSkeletalMeshLODInfo>& lodInfo = SkeletalMesh->GetLODInfoArray();
 
@@ -1456,7 +1456,7 @@ bool FBlastEditorModule::BuildExtendedSupport(ABlastExtendedSupportStructure* Ex
 	FSkeletalMeshLODModel& LODModel = ImportedModel->LODModels[0];
 	LODModel.NumTexCoords = 1;
 
-	SkeletalMesh->SetNumSourceModels(0);
+	SkeletalMesh->ResetLODInfo();
 	FSkeletalMeshLODInfo& lodInfo = SkeletalMesh->AddLODInfo();
 
 	lodInfo.LODHysteresis = 0.02f;

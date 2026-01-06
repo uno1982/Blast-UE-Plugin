@@ -2,7 +2,7 @@
 #include "PhysicsEngine/PhysicsAsset.h"
 #include "Animation/Skeleton.h"
 #include "PhysicsEngine/BodySetup.h"
-#include "PhysicsEngine/SkeletalBodySetup.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "Rendering/SkeletalMeshModel.h"
 #include "UObject/ObjectSaveContext.h"
@@ -455,7 +455,7 @@ void FBlastCookedChunkData::UpdateAfterShapesAdded(UBodySetup* NewBodySetup, Con
 #if BLAST_USE_PHYSX
 		New.SetConvexMesh(ConvexMeshes[C]);
 #else
-		New.SetConvexMeshObject(MoveTemp(ConvexMeshes[C]));
+		New.SetChaosConvexMesh(MoveTemp(ConvexMeshes[C]));
 #endif
 	}
 

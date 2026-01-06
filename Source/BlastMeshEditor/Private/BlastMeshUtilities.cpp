@@ -11,7 +11,6 @@
 #include "Engine/StaticMesh.h"
 #include "Animation/Skeleton.h"
 #include "MeshUtilities.h"
-#include "MaterialDomain.h"
 #include "MeshDescription.h"
 #include "Components/SkinnedMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -23,7 +22,8 @@
 #include "OverlappingCorners.h"
 #include "StaticMeshAttributes.h"
 #include "StaticMeshOperations.h"
-#include "StaticToSkeletalMeshConverter.h"
+// UE 5.1 compatibility: StaticToSkeletalMeshConverter was added in later UE5 versions
+// #include "StaticToSkeletalMeshConverter.h"
 #include "Interfaces/ITargetPlatform.h"
 #include "Interfaces/ITargetPlatformManagerModule.h"
 #include "Misc/CoreMisc.h"
@@ -197,8 +197,14 @@ Nv::Blast::Mesh* CreateAuthoringMeshFromMeshDescription(const FMeshDescription& 
 		const auto EdgesOfTriangle = SourceMeshDescription.GetTriangleEdges(TriID);
 		Facets[TriangleIdx].edgesCount = EdgesOfTriangle.Num();
 
-		const auto VertsOfTriangle = SourceMeshDescription.GetTriangleVertices(TriID);
-		check(VertsOfTriangle.Num() == 3);
+		auto VertsOfTriangleConst = SourceMeshDescription.GetTriangleVertices(TriID);
+		check(VertsOfTriangleConst.Num() == 3);
+		
+		// Make a mutable copy for potential swapping
+		TArray<FVertexID> VertsOfTriangle;
+		VertsOfTriangle.Add(VertsOfTriangleConst[0]);
+		VertsOfTriangle.Add(VertsOfTriangleConst[1]);
+		VertsOfTriangle.Add(VertsOfTriangleConst[2]);
 
 		const FVector3f DeducedNormal = FVector3f::CrossProduct(
 			VertexPositions[VertsOfTriangle[1]] - VertexPositions[VertsOfTriangle[0]],
@@ -473,6 +479,114 @@ FSkeletalMeshImportData CreateSkeletalMeshImportDataFromFractureData(TSharedPtr<
 	return OutData;
 }
 
+// UE 5.1 compatibility: Create skeletal mesh import data from static mesh
+// This replaces FStaticToSkeletalMeshConverter::InitializeSkeletalMeshFromStaticMesh which was added in UE 5.2+
+FSkeletalMeshImportData CreateSkeletalMeshImportDataFromStaticMesh(const UStaticMesh& InSourceStaticMesh, const TArray<SkeletalMeshImportData::FBone>& Bones)
+{
+	FSkeletalMeshImportData OutData;
+	
+	// Get the render data from LOD 0
+	const FStaticMeshRenderData* RenderData = InSourceStaticMesh.GetRenderData();
+	if (!RenderData || RenderData->LODResources.Num() == 0)
+	{
+		UE_LOG(LogSkeletalMesh, Error, TEXT("[BLAST] Static mesh has no render data"));
+		return OutData;
+	}
+	
+	const FStaticMeshLODResources& LODResource = RenderData->LODResources[0];
+	const FPositionVertexBuffer& PositionBuffer = LODResource.VertexBuffers.PositionVertexBuffer;
+	const FStaticMeshVertexBuffer& VertexBuffer = LODResource.VertexBuffers.StaticMeshVertexBuffer;
+	
+	// Get indices
+	TArray<uint32> Indices;
+	LODResource.IndexBuffer.GetCopy(Indices);
+	
+	const uint32 NumVertices = PositionBuffer.GetNumVertices();
+	const uint32 NumTriangles = Indices.Num() / 3;
+	const uint32 NumUVChannels = VertexBuffer.GetNumTexCoords();
+	
+	// Setup import data arrays
+	OutData.Points.AddUninitialized(NumVertices);
+	OutData.PointToRawMap.AddUninitialized(NumVertices);
+	OutData.Wedges.AddUninitialized(Indices.Num());
+	OutData.Faces.SetNum(NumTriangles);
+	OutData.Influences.AddUninitialized(NumVertices);
+	OutData.RefBonesBinary = Bones;
+	OutData.NumTexCoords = FMath::Max<uint32>(1, NumUVChannels);
+	OutData.bHasTangents = true;
+	OutData.bHasNormals = true;
+	OutData.bHasVertexColors = LODResource.VertexBuffers.ColorVertexBuffer.GetNumVertices() > 0;
+	
+	// Copy vertex positions
+	for (uint32 VertIdx = 0; VertIdx < NumVertices; VertIdx++)
+	{
+		OutData.Points[VertIdx] = PositionBuffer.VertexPosition(VertIdx);
+		OutData.PointToRawMap[VertIdx] = VertIdx;
+		
+		// All vertices bound to root bone (index 0) with full weight
+		OutData.Influences[VertIdx].BoneIndex = 0;
+		OutData.Influences[VertIdx].VertexIndex = VertIdx;
+		OutData.Influences[VertIdx].Weight = 1.0f;
+	}
+	
+	// Process triangles and wedges
+	for (uint32 TriIdx = 0; TriIdx < NumTriangles; TriIdx++)
+	{
+		for (uint32 CornerIdx = 0; CornerIdx < 3; CornerIdx++)
+		{
+			const uint32 WedgeIdx = TriIdx * 3 + CornerIdx;
+			const uint32 VertIdx = Indices[WedgeIdx];
+			
+			OutData.Wedges[WedgeIdx].VertexIndex = VertIdx;
+			OutData.Wedges[WedgeIdx].Color = OutData.bHasVertexColors 
+				? LODResource.VertexBuffers.ColorVertexBuffer.VertexColor(VertIdx) 
+				: FColor::White;
+			
+			// Copy UVs
+			for (uint32 UVIdx = 0; UVIdx < OutData.NumTexCoords; UVIdx++)
+			{
+				if (UVIdx < NumUVChannels)
+				{
+					OutData.Wedges[WedgeIdx].UVs[UVIdx] = VertexBuffer.GetVertexUV(VertIdx, UVIdx);
+				}
+				else
+				{
+					OutData.Wedges[WedgeIdx].UVs[UVIdx] = FVector2f::ZeroVector;
+				}
+			}
+			
+			OutData.Faces[TriIdx].WedgeIndex[CornerIdx] = WedgeIdx;
+			OutData.Faces[TriIdx].TangentZ[CornerIdx] = VertexBuffer.VertexTangentZ(VertIdx);
+		}
+		
+		// Determine material index from section
+		int32 MaterialIndex = 0;
+		for (const FStaticMeshSection& Section : LODResource.Sections)
+		{
+			const uint32 FirstTriangle = Section.FirstIndex / 3;
+			const uint32 LastTriangle = FirstTriangle + Section.NumTriangles;
+			if (TriIdx >= FirstTriangle && TriIdx < LastTriangle)
+			{
+				MaterialIndex = Section.MaterialIndex;
+				break;
+			}
+		}
+		OutData.Faces[TriIdx].MatIndex = MaterialIndex;
+		OutData.Faces[TriIdx].SmoothingGroups = 1; // Default smoothing group
+	}
+	
+	// Setup materials
+	OutData.MaxMaterialIndex = InSourceStaticMesh.GetStaticMaterials().Num() - 1;
+	for (const FStaticMaterial& StaticMat : InSourceStaticMesh.GetStaticMaterials())
+	{
+		auto& OutMaterial = OutData.Materials.AddDefaulted_GetRef();
+		OutMaterial.MaterialImportName = StaticMat.ImportedMaterialSlotName.ToString();
+		OutMaterial.Material = StaticMat.MaterialInterface;
+	}
+	
+	return OutData;
+}
+
 void CreateSkeletalMeshFromAuthoring(TSharedPtr<FFractureSession> FractureSession, const UStaticMesh& InSourceStaticMesh)
 {
 	UBlastMesh* BlastMesh = FractureSession->BlastMesh;
@@ -490,32 +604,109 @@ void CreateSkeletalMeshFromAuthoring(TSharedPtr<FFractureSession> FractureSessio
 	USkeletalMesh* SkeletalMesh = NewObject<USkeletalMesh>(
 		BlastMesh, FName(*InSourceStaticMesh.GetName().Append(TEXT("_SkelMesh"))), RF_Public);
 
-	int32 SkeletalDepth = 0;
-	FSkeletalMeshImportData Data;
-	Data.RefBonesBinary = GetBinaryBonesFromFractureData(FTransform::Identity, FractureSession);
-	SkeletalMeshImportUtils::ProcessImportMeshSkeleton(Skeleton, SkeletalMesh->GetRefSkeleton(), SkeletalDepth, Data);
-
-	FSkeletalMeshModel& ImportedResource = *SkeletalMesh->GetImportedModel();
-	ImportedResource.LODModels.Empty();
-
-	bool bBuildSuccess = FStaticToSkeletalMeshConverter::InitializeSkeletalMeshFromStaticMesh(SkeletalMesh, &InSourceStaticMesh, SkeletalMesh->GetRefSkeleton(), NAME_None);
-	if (bBuildSuccess)
+	// Copy materials from static mesh
+	TArray<FSkeletalMaterial>& SkeletalMaterials = SkeletalMesh->GetMaterials();
+	for (const FStaticMaterial& StaticMat : InSourceStaticMesh.GetStaticMaterials())
 	{
-		// Update the skeletal mesh and the skeleton so that their ref skeletons are in sync and the skeleton's preview mesh
-		// is the one we just created.
-		SkeletalMesh->SetSkeleton(Skeleton);
-		Skeleton->MergeAllBonesToBoneTree(SkeletalMesh);
-		if (!Skeleton->GetPreviewMesh())
+		FSkeletalMaterial SkeletalMat;
+		SkeletalMat.MaterialInterface = StaticMat.MaterialInterface;
+		SkeletalMat.MaterialSlotName = StaticMat.MaterialSlotName;
+		SkeletalMat.ImportedMaterialSlotName = StaticMat.ImportedMaterialSlotName;
+		if (SkeletalMat.MaterialInterface)
 		{
-			Skeleton->SetPreviewMesh(SkeletalMesh);
+			SkeletalMat.MaterialInterface->CheckMaterialUsage(MATUSAGE_SkeletalMesh);
 		}
+		SkeletalMaterials.Add(SkeletalMat);
 	}
-	else
+
+	// Create bones from fracture data
+	TArray<SkeletalMeshImportData::FBone> Bones = GetBinaryBonesFromFractureData(FTransform::Identity, FractureSession);
+	
+	// Create import data from static mesh
+	FSkeletalMeshImportData ImportData = CreateSkeletalMeshImportDataFromStaticMesh(InSourceStaticMesh, Bones);
+	
+	if (ImportData.Points.Num() == 0)
 	{
-		UE_LOG(LogSkeletalMesh, Error, TEXT("[BLAST] Failed to import static mesh data!"));
+		UE_LOG(LogSkeletalMesh, Error, TEXT("[BLAST] Failed to create import data from static mesh!"));
 		SkeletalMesh->MarkAsGarbage();
 		Skeleton->MarkAsGarbage();
 		return;
+	}
+
+	// Process skeleton
+	int32 SkeletalDepth = 0;
+	if (!SkeletalMeshImportUtils::ProcessImportMeshSkeleton(Skeleton, SkeletalMesh->GetRefSkeleton(), SkeletalDepth, ImportData))
+	{
+		UE_LOG(LogSkeletalMesh, Warning, TEXT("[BLAST] Failed importing skeleton data"));
+	}
+
+	// Process materials
+	SkeletalMeshImportUtils::ProcessImportMeshMaterials(SkeletalMesh->GetMaterials(), ImportData);
+	
+	// Process bone influences
+	SkeletalMeshImportUtils::ProcessImportMeshInfluences(ImportData, SkeletalMesh->GetPathName());
+
+	// Setup LOD
+	FSkeletalMeshModel& ImportedResource = *SkeletalMesh->GetImportedModel();
+	ImportedResource.LODModels.Empty();
+	ImportedResource.LODModels.Add(new FSkeletalMeshLODModel());
+	ImportedResource.LODModels[0].NumTexCoords = FMath::Max<uint32>(1, ImportData.NumTexCoords);
+
+	SkeletalMesh->ResetLODInfo();
+	FSkeletalMeshLODInfo& NewLODInfo = SkeletalMesh->AddLODInfo();
+	NewLODInfo.ReductionSettings.NumOfTrianglesPercentage = 1.0f;
+	NewLODInfo.ReductionSettings.NumOfVertPercentage = 1.0f;
+	NewLODInfo.ReductionSettings.MaxDeviationPercentage = 0.0f;
+	NewLODInfo.LODHysteresis = 0.02f;
+	NewLODInfo.BuildSettings.bRecomputeNormals = false;
+	NewLODInfo.BuildSettings.bRecomputeTangents = true;
+	NewLODInfo.BuildSettings.bUseMikkTSpace = true;
+
+	// Save import data
+	PRAGMA_DISABLE_DEPRECATION_WARNINGS
+	SkeletalMesh->SaveLODImportedData(0, ImportData);
+	PRAGMA_ENABLE_DEPRECATION_WARNINGS
+
+	// Set bounds
+	const FBox3f BoundingBox(ImportData.Points.GetData(), ImportData.Points.Num());
+	SkeletalMesh->SetImportedBounds(FBoxSphereBounds(FBox(BoundingBox)));
+	SkeletalMesh->SetHasVertexColors(ImportData.bHasVertexColors);
+	if (ImportData.bHasVertexColors)
+	{
+		SkeletalMesh->SetVertexColorGuid(FGuid::NewGuid());
+	}
+	else
+	{
+		SkeletalMesh->SetVertexColorGuid(FGuid());
+	}
+
+	// Build the skeletal mesh
+	IMeshBuilderModule& MeshBuilderModule = IMeshBuilderModule::GetForRunningPlatform();
+	FSkeletalMeshBuildParameters SkeletalMeshBuildParameters(SkeletalMesh, GetTargetPlatformManagerRef().GetRunningTargetPlatform(), 0, false);
+	const bool bBuildSuccess = MeshBuilderModule.BuildSkeletalMesh(SkeletalMeshBuildParameters);
+	
+	if (!bBuildSuccess)
+	{
+		UE_LOG(LogSkeletalMesh, Error, TEXT("[BLAST] Failed to build skeletal mesh from static mesh data!"));
+		SkeletalMesh->MarkAsGarbage();
+		Skeleton->MarkAsGarbage();
+		return;
+	}
+
+	SkeletalMesh->CalculateInvRefMatrices();
+
+	if (!SkeletalMesh->GetResourceForRendering() || !SkeletalMesh->GetResourceForRendering()->LODRenderData.IsValidIndex(0))
+	{
+		SkeletalMesh->Build();
+	}
+
+	// Update the skeletal mesh and the skeleton so that their ref skeletons are in sync
+	SkeletalMesh->SetSkeleton(Skeleton);
+	Skeleton->MergeAllBonesToBoneTree(SkeletalMesh);
+	Skeleton->RecreateBoneTree(SkeletalMesh);
+	if (!Skeleton->GetPreviewMesh())
+	{
+		Skeleton->SetPreviewMesh(SkeletalMesh);
 	}
 	
 	BlastMesh->Skeleton = Skeleton;

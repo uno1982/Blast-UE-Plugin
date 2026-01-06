@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/SkeletalMesh.h"
+#include "Chaos/Convex.h"
 #include "BlastAsset.h"
 #include "BlastAssetImportData.h"
 #include "BlastMaterial.h"
@@ -321,7 +322,7 @@ private:
 #if BLAST_USE_PHYSX
 	typedef TArray<physx::PxConvexMesh*, TInlineAllocator<32>> ConvexMeshTempList;
 #else
-	typedef TArray<Chaos::FConvexPtr, TInlineAllocator<32>> ConvexMeshTempList;
+	typedef TArray<TSharedPtr<Chaos::FConvex, ESPMode::ThreadSafe>, TInlineAllocator<32>> ConvexMeshTempList;
 #endif
 	static void UpdateAfterShapesAdded(class UBodySetup* NewBodySetup, ConvexMeshTempList ConvexMeshes);
 };

@@ -4,7 +4,7 @@
 
 #include "Math/UnrealMathUtility.h"
 #include "PhysicsEngine/PhysicsAsset.h"
-#include "PhysicsEngine/SkeletalBodySetup.h"
+#include "PhysicsEngine/BodySetup.h"
 
 UViewportBlastMeshComponent::UViewportBlastMeshComponent(const FObjectInitializer& ObjectInitializer):
 	Super(ObjectInitializer)	

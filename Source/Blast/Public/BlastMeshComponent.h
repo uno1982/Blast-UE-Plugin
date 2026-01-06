@@ -6,7 +6,7 @@
 #include "Components/LineBatchComponent.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "ComponentInstanceDataCache.h"
-#include "SkeletalMeshSceneProxy.h"
+#include "Rendering/SkeletalMeshRenderData.h"
 
 #include "BlastMesh.h"
 #include "BlastAsset.h"
@@ -170,7 +170,7 @@ public:
 	bool							bShouldAllChildrenChunksBeSmallChunks;
 
 	// If enabled, blast will bind its own onhit logic into hit callbacks. If you need to use Blast's own impact logic, enable this
-	UPROPERTY(EditDefaultsOnly, Category = "Blast")
+	UPROPERTY(EditAnywhere, Category = "Blast")
 	bool							bBindOnHitDelegate;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blast", meta = (PinHiddenByDefault, InlineEditConditionToggle, CantUseWithExtendedSupport))

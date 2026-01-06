@@ -3,7 +3,7 @@
 #include "Engine/OverlapResult.h"
 #include "TimerManager.h"
 #include "PhysicsEngine/BodySetup.h"
-#include "PhysicsEngine/SkeletalBodySetup.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "PhysicsEngine/PhysicsAsset.h"
 #include "Math/UnrealMathUtility.h"
 #include "SkeletalRenderPublic.h"
@@ -36,8 +36,7 @@
 #if BLAST_USE_PHYSX
 #else
 #include "Chaos/ChaosScene.h"
-#include "Physics/Experimental/ChaosScopedSceneLock.h"
-#include "Physics/Experimental/PhysScene_Chaos.h"
+#include "BlastChaosCompat.h"
 #include "PBDRigidsSolver.h"
 #endif
 
@@ -61,7 +60,7 @@ UBlastMeshComponent::UBlastMeshComponent(const FObjectInitializer& ObjectInitial
 	SmallChunkRadius(20.f),
 	bCrumbleInmostChunks(false),
 	bShouldAllChildrenChunksBeSmallChunks(false),
-	bBindOnHitDelegate(false),
+	bBindOnHitDelegate(true),
 	bOverride_BlastMaterial(false),
 	bOverride_StressProperties(false),
 	bOverride_DebrisProperties(false),
@@ -334,7 +333,7 @@ void UBlastMeshComponent::InitBlastFamily()
 	// hide all chunks at first
 	uint32 ChunkCount = BlastAsset->GetChunkCount();
 	ChunkVisibility.Empty();
-	ChunkVisibility.SetNum(ChunkCount, false);
+	ChunkVisibility.Init(false, ChunkCount);
 	bChunkVisibilityChanged = true;
 	DebrisCount = 0;
 
@@ -1615,7 +1614,11 @@ void UBlastMeshComponent::CreateRenderState_Concurrent(FRegisterComponentContext
 {
 	Super::CreateRenderState_Concurrent(Context);
 	
-	FRegisterComponentContext::SendRenderDynamicData(Context, this);
+	// UE 5.1: SendRenderDynamicData is called differently
+	if (Context)
+	{
+		Context->AddPrimitive(this);
+	}
 }
 
 void UBlastMeshComponent::DestroyRenderState_Concurrent()
@@ -2954,7 +2957,7 @@ void UBlastMeshComponent::TickStressSolver()
 #if BLAST_USE_PHYSX
 	Gravity = GetPXScene()->getGravity();
 #else
-	Gravity = GetWorld()->GetPhysicsScene()->GetSolver()->GetEvolution()->GetGravityForces().GetAcceleration(0);
+	Gravity = GetWorld()->GetPhysicsScene()->GetSolver()->GetEvolution()->GetGravityForces().GetAcceleration();
 #endif
 
 	// Apply all relevant forces on actors in stress solver
@@ -3447,15 +3450,11 @@ const FName UBlastMeshComponent::ActorBaseName("Actor");
 FPrimitiveSceneProxy* UBlastMeshComponent::CreateSceneProxy()
 {
 	LLM_SCOPE(ELLMTag::SkeletalMesh);
-	ERHIFeatureLevel::Type SceneFeatureLevel = GetWorld()->GetFeatureLevel();
+	ERHIFeatureLevel::Type SceneFeatureLevel = GetWorld()->FeatureLevel;
 	FBlastMeshSceneProxy* Result = nullptr;
 	FSkeletalMeshRenderData* SkelMeshRenderData = GetSkeletalMeshRenderData();
 
-	if (CheckPSOPrecachingAndBoostPriority() && GetPSOPrecacheProxyCreationStrategy() == EPSOPrecacheProxyCreationStrategy::DelayUntilPSOPrecached)
-	{
-		UE_LOG(LogBlast, Verbose, TEXT("Skipping CreateSceneProxy for UBlastMeshComponent %s (UBlastMeshComponent PSOs are still compiling)"), *GetFullName());
-		return nullptr;
-	}
+	// UE 5.1: PSO precaching APIs don't exist, skip that check
 
 	// Only create a scene proxy for rendering if properly initialized
 	if (SkelMeshRenderData &&

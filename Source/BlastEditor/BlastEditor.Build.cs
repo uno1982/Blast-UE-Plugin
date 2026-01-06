@@ -32,6 +32,7 @@ namespace UnrealBuildTool.Rules
                     "Engine",
                     "RenderCore",
                     "Renderer",
+                    "Chaos",
                     "PropertyEditor",
                     "XmlParser",
                     "Slate",

@@ -7,7 +7,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "PhysicsAssetUtils.h"
 #include "PhysicsEngine/PhysicsAsset.h"
-#include "PhysicsEngine/SkeletalBodySetup.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "Factories/FbxSkeletalMeshImportData.h"
 #include "Misc/FeedbackContext.h"
 #include "HAL/PlatformFilemanager.h"
@@ -458,7 +458,6 @@ USkeletalMesh* UBlastMeshFactory::ImportSkeletalMesh(UBlastMesh* BlastMesh, FNam
 						}
 					}
 					FSkeletalMeshImportData OutData;
-					bool bMapMorphTargetToTimeZero = false;
 					if (LODIndex == 0 && SkelMeshNodeArray.Num() != 0)
 					{
 						FString Name = skelMeshName.ToString();
@@ -483,7 +482,6 @@ USkeletalMesh* UBlastMeshFactory::ImportSkeletalMesh(UBlastMesh* BlastMesh, FNam
 						{
 							//Set the base skeletalmesh to the scoped post edit change variable
 							ScopedPostEditChange.SetSkeletalMesh(BaseSkeletalMesh);
-							bMapMorphTargetToTimeZero = ImportSkeletalMeshArgs.bMapMorphTargetToTimeZero;
 							ImportedSuccessfulLodIndex = SuccessfulLodIndex;
 							//Increment the LOD index
 							SuccessfulLodIndex++;
@@ -523,7 +521,6 @@ USkeletalMesh* UBlastMeshFactory::ImportSkeletalMesh(UBlastMesh* BlastMesh, FNam
 							FSkeletalMeshLODInfo* LODInfo = BaseSkeletalMesh->GetLODInfo(SuccessfulLodIndex);
 							LODInfo->bImportWithBaseMesh = true;
 							LODInfo->SourceImportFilename = FString(TEXT(""));
-							bMapMorphTargetToTimeZero = ImportSkeletalMeshArgs.bMapMorphTargetToTimeZero;
 							ImportedSuccessfulLodIndex = SuccessfulLodIndex;
 							SuccessfulLodIndex++;
 						}
@@ -544,7 +541,7 @@ USkeletalMesh* UBlastMeshFactory::ImportSkeletalMesh(UBlastMesh* BlastMesh, FNam
 						uint32 bImportTextures = FBXImportOptions->bImportTextures;
 						FBXImportOptions->bImportTextures = 0;
 
-						FbxImporter->ImportFbxMorphTarget(SkelMeshNodeArray, BaseSkeletalMesh, ImportedSuccessfulLodIndex, OutData, bMapMorphTargetToTimeZero);
+						FbxImporter->ImportFbxMorphTarget(SkelMeshNodeArray, BaseSkeletalMesh, ImportedSuccessfulLodIndex, OutData);
 						bOperationCanceled |= FbxImporter->GetImportOperationCancelled();
 
 						FBXImportOptions->bImportMaterials = !!bImportMaterials;

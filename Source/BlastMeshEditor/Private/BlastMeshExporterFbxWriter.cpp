@@ -345,7 +345,7 @@ uint32 FbxFileWriter::createChunkRecursive(uint32 currentCpIdx, uint32 chunkInde
 
 	auto chunks = NvBlastAssetGetChunks(aResult.asset, Nv::Blast::logLL);
 	const NvBlastChunk* chunk = &chunks[chunkIndex];
-	NvcVec3 centroid = NvcVec3(chunk->centroid[0], chunk->centroid[1], chunk->centroid[2]);
+	NvcVec3 centroid = {chunk->centroid[0], chunk->centroid[1], chunk->centroid[2]};
 
 	//mesh->InitTextureUV(triangles.size() * 3);
 
@@ -357,7 +357,7 @@ uint32 FbxFileWriter::createChunkRecursive(uint32 currentCpIdx, uint32 chunkInde
 		skelAttrib->SetSkeletonType(FbxSkeleton::eRoot);
 
 		// Change the centroid to origin
-		centroid = NvcVec3(0.0f);
+		centroid = {0.0f, 0.0f, 0.0f};
 	}
 	else
 	{
@@ -470,7 +470,7 @@ void FbxFileWriter::createChunkRecursiveNonSkinned(const std::string& meshName, 
 {
 	auto chunks = NvBlastAssetGetChunks(meshData.asset, Nv::Blast::logLL);
 	const NvBlastChunk* chunk = &chunks[chunkIndex];
-	NvcVec3 centroid = NvcVec3(chunk->centroid[0], chunk->centroid[1], chunk->centroid[2]);
+	NvcVec3 centroid = {chunk->centroid[0], chunk->centroid[1], chunk->centroid[2]};
 
 	FString chunkName = FbxUtils::getChunkNodeName(chunkIndex);
 
@@ -573,7 +573,7 @@ void FbxFileWriter::createChunkRecursiveNonSkinned(const std::string& meshName, 
 {
 	auto chunks = NvBlastAssetGetChunks(aResult.asset, Nv::Blast::logLL);
 	const NvBlastChunk* chunk = &chunks[chunkIndex];
-	NvcVec3 centroid = NvcVec3(chunk->centroid[0], chunk->centroid[1], chunk->centroid[2]);
+	NvcVec3 centroid = {chunk->centroid[0], chunk->centroid[1], chunk->centroid[2]};
 
 	FString chunkName = FbxUtils::getChunkNodeName(chunkIndex);
 
@@ -771,7 +771,7 @@ uint32 FbxFileWriter::createChunkRecursive(uint32 currentCpIdx, uint32 chunkInde
 {
 	auto chunks = NvBlastAssetGetChunks(meshData.asset, Nv::Blast::logLL);
 	const NvBlastChunk* chunk = &chunks[chunkIndex];
-	NvcVec3 centroid = NvcVec3(chunk->centroid[0], chunk->centroid[1], chunk->centroid[2]);
+	NvcVec3 centroid = {chunk->centroid[0], chunk->centroid[1], chunk->centroid[2]};
 
 	FString boneName = FbxUtils::getChunkNodeName(chunkIndex);
 
@@ -781,7 +781,7 @@ uint32 FbxFileWriter::createChunkRecursive(uint32 currentCpIdx, uint32 chunkInde
 		skelAttrib->SetSkeletonType(FbxSkeleton::eRoot);
 
 		// Change the centroid to origin
-		centroid = NvcVec3(0.0f);
+		centroid = {0.0f, 0.0f, 0.0f};
 	}
 	else
 	{

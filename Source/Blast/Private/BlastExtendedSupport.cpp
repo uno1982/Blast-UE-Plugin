@@ -8,8 +8,7 @@
 #include "PhysicsPublic.h"
 #include "ShowFlags.h"
 #include "SceneManagement.h"
-#include "Physics/Experimental/ChaosScopedSceneLock.h"
-#include "Physics/Experimental/PhysScene_Chaos.h"
+#include "BlastChaosCompat.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(BlastExtendedSupport)
 
