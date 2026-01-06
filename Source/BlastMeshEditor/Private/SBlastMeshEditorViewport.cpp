@@ -16,7 +16,6 @@
 #include "Slate/SceneViewport.h"
 #include "UObject/UObjectHash.h"
 #include "PhysicsEngine/PhysicsAsset.h"
-#include "PhysicsEngine/SkeletalBodySetup.h"
 #include "SEditorViewportViewMenu.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "NvBlastExtAuthoringTypes.h"

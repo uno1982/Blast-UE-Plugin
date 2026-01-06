@@ -23,7 +23,6 @@
 #include "blast-sdk/extensions/serialization/NvBlastExtSerialization.h"
 #include "blast-sdk/extensions/serialization/NvBlastExtLlSerialization.h"
 #include "PhysicsEngine/PhysicsAsset.h"
-#include "PhysicsEngine/SkeletalBodySetup.h"
 
 
 //////////////////////////////////////////////////////////////////////////

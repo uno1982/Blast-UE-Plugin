@@ -4,6 +4,7 @@
 #include "BlastFracture.h"
 #include "BlastMesh.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/SkinnedAssetCommon.h"
 #include "BlastMeshEditor.h"
 
 //#include "Materials/Material.h"

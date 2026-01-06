@@ -7,7 +7,6 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "PhysicsAssetUtils.h"
 #include "PhysicsEngine/PhysicsAsset.h"
-#include "PhysicsEngine/SkeletalBodySetup.h"
 #include "Factories/FbxSkeletalMeshImportData.h"
 #include "Misc/FeedbackContext.h"
 #include "HAL/PlatformFilemanager.h"
