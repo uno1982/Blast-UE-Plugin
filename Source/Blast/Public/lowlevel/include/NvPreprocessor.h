@@ -273,7 +273,7 @@ Assert macro
 DLL export macros
 */
 #ifndef NV_C_EXPORT
-#if NV_WINDOWS_FAMILY || NV_LINUX || NV_PS4 || NV_XBOXONE
+#if NV_WINDOWS_FAMILY || NV_LINUX || NV_ANDROID || NV_PS4 || NV_XBOXONE
 #define NV_C_EXPORT extern "C"
 #else
 #define NV_C_EXPORT
@@ -538,3 +538,4 @@ protected:                                                                      
 
 /** @} */
 #endif // #ifndef NV_NVFOUNDATION_NVPREPROCESSOR_H
+

@@ -184,6 +184,8 @@ LibFolderName));
                  "NvBlastGlobals",
                  "NvBlastExtSerialization",
                  "NvBlastExtShaders",
+                 "capnp",
+                 "kj",
             };
 
             PrivateIncludePaths.AddRange(
@@ -206,3 +208,4 @@ LibFolderName));
         }
     }
 }
+
