@@ -7,6 +7,7 @@ NVIDIA Blast destruction plugin for **Unreal Engine 5** with full Android ARM64 
 | UE Version | Branch | Status |
 |------------|--------|--------|
 | UE 5.5 | `UE5-android-support` | ✅ Full |
+| UE 5.4 | `5.4-android-support` | ✅ Full |
 | UE 5.1 | `5.1-android-support` | ✅ Full |
 | UE 4.27 | `4.27-android-support` | ✅ Full |
 
