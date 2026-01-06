@@ -61,7 +61,7 @@ UBlastMeshComponent::UBlastMeshComponent(const FObjectInitializer& ObjectInitial
 	SmallChunkRadius(20.f),
 	bCrumbleInmostChunks(false),
 	bShouldAllChildrenChunksBeSmallChunks(false),
-	bBindOnHitDelegate(false),
+	bBindOnHitDelegate(true),
 	bOverride_BlastMaterial(false),
 	bOverride_StressProperties(false),
 	bOverride_DebrisProperties(false),

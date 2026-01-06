@@ -699,13 +699,12 @@ public:
 
 		SkeletalMesh->SetImportedBounds(FBoxSphereBounds(MeshBounds));
 
-		SkeletalMesh->SetNumSourceModels(0);
-		SkeletalMesh->AddLODInfo();
-		TArray<FSkeletalMeshLODInfo>& lodInfo = SkeletalMesh->GetLODInfoArray();
+		SkeletalMesh->ResetLODInfo();
+		FSkeletalMeshLODInfo& lodInfo = SkeletalMesh->AddLODInfo();
 
-		lodInfo[0].LODHysteresis = 0.02f;
+		lodInfo.LODHysteresis = 0.02f;
 		FSkeletalMeshOptimizationSettings Settings;
-		lodInfo[0].ReductionSettings = Settings;
+		lodInfo.ReductionSettings = Settings;
 
 		SkeletalMesh->CalculateInvRefMatrices();
 		SkeletalMesh->PostEditChange();
@@ -1456,7 +1455,7 @@ bool FBlastEditorModule::BuildExtendedSupport(ABlastExtendedSupportStructure* Ex
 	FSkeletalMeshLODModel& LODModel = ImportedModel->LODModels[0];
 	LODModel.NumTexCoords = 1;
 
-	SkeletalMesh->SetNumSourceModels(0);
+	SkeletalMesh->ResetLODInfo();
 	FSkeletalMeshLODInfo& lodInfo = SkeletalMesh->AddLODInfo();
 
 	lodInfo.LODHysteresis = 0.02f;
