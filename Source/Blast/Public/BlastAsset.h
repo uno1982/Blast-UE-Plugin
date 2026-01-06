@@ -2,7 +2,6 @@
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
 #include "Serialization/BulkData.h"
-
 #include "BlastAsset.generated.h"
 
 struct NvBlastAsset;
@@ -24,43 +23,32 @@ enum class EBlastMeshChunkFlags : uint8
 };
 ENUM_CLASS_FLAGS(EBlastMeshChunkFlags);
 
-struct FBlastEdge
-{
-    uint32 S;
-    uint32 E;
-};
-
-struct FBlastVertex
-{
-    FVector3f P;      // Position
-    FVector3f N;      // Normal
-    FVector2f UV[1];  // UV-coordinates array, currently supported only one UV coordinate.
-};
-
-struct FBlastFacet
-{
-    int32 FirstEdgeNumber;
-    uint32 EdgesCount;
-    int64 UserData;
-    int32 MaterialId;
-    int32 SmoothingGroup;
-};
-
-struct FBlastChunkMesh
-{
-	TArray<FBlastVertex> Vertices;
-	TArray<FBlastEdge> Edges;
-	TArray<FBlastFacet> Faces;
-	EBlastMeshChunkFlags ChunkFlag = EBlastMeshChunkFlags::None;
-};
 
 USTRUCT()
 struct FBlastFractureToolData
 {
 	GENERATED_USTRUCT_BODY()
 
-	// Chunks by asset index
-	TArray<FBlastChunkMesh> ChunkMeshes;
+	UPROPERTY()
+	TArray<uint8> Vertices;
+
+	UPROPERTY()
+	TArray<uint8> Edges;
+
+	UPROPERTY()
+	TArray<uint8> Faces;
+
+	UPROPERTY()
+	TArray<uint32> VerticesOffset;
+
+	UPROPERTY()
+	TArray<uint32> EdgesOffset;
+
+	UPROPERTY()
+	TArray<uint32> FacesOffset;
+
+	UPROPERTY()
+	TArray<EBlastMeshChunkFlags> ChunkFlags;
 };
 
 #if WITH_EDITOR
@@ -146,8 +134,8 @@ struct FBlastFractureHistory
 			}
 			Tail = Head = Curr = 0;
 			Capacity = 1;
-			ToolDataHistory.SetNum(Capacity, EAllowShrinking::No);
-			LoadedAssetHistory.SetNum(Capacity, EAllowShrinking::No);
+			ToolDataHistory.SetNum(Capacity, false);
+			LoadedAssetHistory.SetNum(Capacity, false);
 		}
 	}
 
@@ -261,6 +249,7 @@ private:
 	void	BuildChunkMaxDepth();
 
 	// Per chunk flags
+	UPROPERTY()
 	TArray<EBlastAssetChunkFlags>			ChunksFlags;
 
 	UPROPERTY()

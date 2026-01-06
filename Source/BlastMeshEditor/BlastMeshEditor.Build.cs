@@ -10,17 +10,21 @@ namespace UnrealBuildTool.Rules
         {
             PrivateIncludePaths.AddRange(
                 new string[] {
-                    Path.GetFullPath(Path.Combine(PluginDirectory, "Libraries", "include")),
-                    Path.GetFullPath(Path.Combine(PluginDirectory, "Libraries", "include", "blast-sdk", "lowlevel")),
-                    Path.GetFullPath(Path.Combine(PluginDirectory, "Libraries", "include", "blast-sdk", "globals")),
-                    Path.GetFullPath(Path.Combine(PluginDirectory, "Libraries", "include", "blast-sdk", "extensions", "authoringCommon")),
-                    Path.GetFullPath(Path.Combine(PluginDirectory, "Libraries", "include", "blast-sdk", "shared", "NvFoundation"))
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "../Blast/Public/extensions/assetutils/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "../Blast/Public/extensions/authoring/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "../Blast/Public/extensions/authoringCommon/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "../Blast/Public/extensions/serialization/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "../Blast/Public/extensions/shaders/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "../Blast/Public/extensions/stress/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "../Blast/Public/globals/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "../Blast/Public/lowlevel/include/")),
                 }
             );
 
             PublicDependencyModuleNames.AddRange(
                 new string[] {
-                "Engine"
+                "Engine",
+                "PhysX"
                 }
             );
 
@@ -45,12 +49,9 @@ namespace UnrealBuildTool.Rules
                 "MeshMergeUtilities",
                 "RawMesh",
                 "MeshUtilitiesCommon",
-                "MeshDescription",
                 "StaticMeshDescription",
                 "MeshDescriptionOperations",
                 "RHI",
-                "SkeletalMeshUtilitiesCommon",
-                "ImageCore",
                 }
             );
 
@@ -64,6 +65,8 @@ namespace UnrealBuildTool.Rules
             Blast.SetupModuleBlastSupport(this, BlastLibs);
 
             AddEngineThirdPartyPrivateStaticDependencies(Target, "FBX");
+
+            //SetupModulePhysXAPEXSupport(Target);
         }
     }
 }

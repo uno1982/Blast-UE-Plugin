@@ -9,14 +9,17 @@ namespace UnrealBuildTool.Rules
         {
             PrivateIncludePaths.AddRange(
                 new string[] {
-                    Path.GetFullPath(Path.Combine(PluginDirectory, "Libraries", "include")),
-                    Path.GetFullPath(Path.Combine(PluginDirectory, "Libraries", "include", "blast-sdk", "lowlevel")),
-                    Path.GetFullPath(Path.Combine(PluginDirectory, "Libraries", "include", "blast-sdk", "globals")),
-                    Path.GetFullPath(Path.Combine(PluginDirectory, "Libraries", "include", "blast-sdk", "extensions", "authoringCommon")),
-                    Path.GetFullPath(Path.Combine(PluginDirectory, "Libraries", "include", "blast-sdk", "shared", "NvFoundation"))
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "../Blast/Public/extensions/assetutils/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "../Blast/Public/extensions/authoring/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "../Blast/Public/extensions/authoringCommon/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "../Blast/Public/extensions/serialization/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "../Blast/Public/extensions/shaders/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "../Blast/Public/extensions/stress/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "../Blast/Public/globals/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "../Blast/Public/lowlevel/include/")),
                 }
             );
-            
+
             PublicDependencyModuleNames.AddRange(
                 new string[] {
                     "Blast",
@@ -26,6 +29,7 @@ namespace UnrealBuildTool.Rules
 
             PrivateDependencyModuleNames.AddRange(
                 new string[] {
+                    "Blast",
                     "Core",
                     "CoreUObject",
                     "AssetTools",
@@ -37,16 +41,15 @@ namespace UnrealBuildTool.Rules
                     "Slate",
                     "ContentBrowser",
                     "Projects",
+                    "Slate",
                     "SlateCore",
                     "MainFrame",
                     "InputCore",
                     "EditorStyle",
                     "LevelEditor",
                     "JsonUtilities",
-                    "PhysicsUtilities",
                     "Json",
                     "RHI",
-                    "SkeletalMeshUtilitiesCommon",
                 }
             );
 

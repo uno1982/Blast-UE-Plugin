@@ -1,18 +1,15 @@
 #include "BlastAsset.h"
+#include "NvBlastTypes.h"
+#include "NvBlastExtSerialization.h"
+#include "NvBlastExtLlSerialization.h"
+#include "NvBlast.h"
+#include "NvBlastGlobals.h"
 
 #include "Misc/Guid.h"
 #include "Serialization/CustomVersion.h"
 #include "Containers/Queue.h"
 
-#include "NvBlastTypes.h"
-#include "blast-sdk/extensions/serialization/NvBlastExtSerialization.h"
-#include "blast-sdk/extensions/serialization/NvBlastExtLlSerialization.h"
-#include "NvBlast.h"
-#include "blast-sdk/globals/NvBlastGlobals.h"
-
-#include UE_INLINE_GENERATED_CPP_BY_NAME(BlastAsset)
-
-UBlastAsset::UBlastAsset(const FObjectInitializer& ObjectInitializer) :
+UBlastAsset::UBlastAsset(const FObjectInitializer& ObjectInitializer):
 	Super(ObjectInitializer)
 {
 	RawAssetData.SetBulkDataFlags(BULKDATA_SerializeCompressed);
@@ -41,10 +38,10 @@ uint64 UBlastAsset::SerializeBlastAsset(void*& buffer, const NvBlastAsset* asset
 void UBlastAsset::CopyFromLoadedAsset(const NvBlastAsset* AssetToCopy, const FGuid& NewAssetGUID)
 {
 	// Serialize modified asset into buffer and put it into the new UBlastAsset
-	void* Buffer;
+	void *Buffer;
 
 	TSharedPtr<NvBlastAsset>& LoadedAsset = FractureHistory.GetCurrentLoadedAsset();
-
+	
 	uint32 BufferSize = SerializeBlastAsset(Buffer, AssetToCopy);
 	if (BufferSize)
 	{
@@ -55,9 +52,9 @@ void UBlastAsset::CopyFromLoadedAsset(const NvBlastAsset* AssetToCopy, const FGu
 
 		//We can't lock the raw asset until we save so we can't call DeserializeRawAsset
 		LoadedAsset = TSharedPtr<NvBlastAsset>(DeserializeBlastAsset(Buffer, BufferSize), [=](NvBlastAsset* asset)
-			{
-				NVBLAST_FREE((void*)asset);
-			});
+		{
+			NVBLAST_FREE((void*)asset);
+		});
 
 		NVBLAST_FREE(Buffer);
 	}
@@ -92,10 +89,10 @@ void UBlastAsset::DeserializeRawAsset()
 		if (DataPtr)
 		{
 #if WITH_EDITOR
-			LoadedAsset = TSharedPtr<NvBlastAsset>(DeserializeBlastAsset(DataPtr, BulkDataSize), [](NvBlastAsset* asset)
-				{
-					NVBLAST_FREE((void*)asset);
-				});
+			LoadedAsset = TSharedPtr<NvBlastAsset>(DeserializeBlastAsset(DataPtr, BulkDataSize), [=](NvBlastAsset* asset)
+			{
+				NVBLAST_FREE((void*)asset);
+			});
 #else
 			Asset = DeserializeBlastAsset(DataPtr, BulkDataSize);
 #endif
@@ -142,7 +139,7 @@ void UBlastAsset::Update()
 		const NvBlastChunk* chunks = NvBlastAssetGetChunks(GetLoadedAsset(), Nv::Blast::logLL);
 		for (uint32 i = 0; i < chunkCount; i++)
 		{
-			if (chunks[i].parentChunkIndex == UINT32_MAX)
+			if (chunks[i].parentChunkIndex == 0xFFFFFFFF)
 			{
 				RootChunks.Add(i);
 			}
@@ -150,7 +147,7 @@ void UBlastAsset::Update()
 
 		auto& graph = NvBlastAssetGetSupportGraph(GetLoadedAsset(), Nv::Blast::logLL);
 		SupportChunks.Reset(graph.nodeCount);
-		for (uint32 i = 0; i < graph.nodeCount; i++)
+		for (uint32_t i = 0; i < graph.nodeCount; i++)
 		{
 			SupportChunks.Add(graph.chunkIndices[i]);
 		}
@@ -263,12 +260,10 @@ void UBlastAsset::SetChunkStatic(uint32 ChunkIndex, bool IsStatic)
 	const NvBlastAsset* LLBlastAsset = GetLoadedAsset();
 	const NvBlastChunk* chunks = NvBlastAssetGetChunks(LLBlastAsset, Nv::Blast::logLL);
 
-	// TODO: this doesn't save because ChunksFlags gets zeroed out on load
-	// Besides, ChunksFlags is a super inefficient data store. Lots of serialization time.
 	if (IsStatic)
 	{
 		// Mark this chunk and all parent chunks till the root as static
-		for (uint32 index = ChunkIndex; index != UINT32_MAX; index = chunks[index].parentChunkIndex)
+		for(uint32 index = ChunkIndex; index != UINT32_MAX; index = chunks[index].parentChunkIndex)
 		{
 			ChunksFlags[index] |= EBlastAssetChunkFlags::Static;
 		}
@@ -301,7 +296,7 @@ void UBlastAsset::PostLoad()
 //The value of this is not important, it's just used to tag our version code
 static FGuid BlastAssetDataFormatGUID(0x648A6305, 0x343D4537, 0x98F6EF84, 0xE044E371);
 
-enum EBlastAssetDataFormatVersion
+enum EBlastAssetDataFormatVersion 
 {
 	EBlastAssetDataFormatVersion_Initial = 1,
 	EBlastAssetDataFormatVersion_AddedAssetGUID,
@@ -312,7 +307,7 @@ FCustomVersionRegistration GRegisterUBlastAssetDataFormat(BlastAssetDataFormatGU
 void UBlastAsset::Serialize(FArchive& Ar)
 {
 	Super::Serialize(Ar);
-
+	
 	//Not used for anything not crashing when reading old files, but be future proof
 	Ar.UsingCustomVersion(BlastAssetDataFormatGUID);
 

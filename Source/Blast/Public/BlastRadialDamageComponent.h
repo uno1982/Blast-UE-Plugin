@@ -14,7 +14,7 @@ struct RadialDamageProgramWithForce final : public FBlastBaseDamageProgram
 	virtual void ExecutePostSplit(const FInput& input, UBlastMeshComponent& owner) const override;
 	virtual FCollisionShape GetCollisionShape() const override;
 
-	TObjectPtr<UBlastRadialDamageComponent> DamageComponent;
+	UBlastRadialDamageComponent* DamageComponent;
 };
 
 
@@ -53,5 +53,5 @@ private:
 	RadialDamageProgramWithForce DamageProgram;
 
 	UPROPERTY()
-	TObjectPtr<URadialForceComponent>	ForceComponent;
+	URadialForceComponent*	ForceComponent;
 };

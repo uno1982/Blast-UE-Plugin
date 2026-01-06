@@ -1,30 +1,6 @@
 // Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
 
 #include "BlastMeshEditor.h"
-
-#include "Misc/Paths.h"
-#include "Misc/MessageDialog.h"
-#include "DesktopPlatformModule.h"
-#include "Framework/Commands/UICommandList.h"
-#include "FbxImporter.h"
-#include "Framework/MultiBox/MultiBoxBuilder.h"
-#include "Components/SkinnedMeshComponent.h"
-#include "Engine/StaticMesh.h"
-#include "Modules/ModuleManager.h"
-#include "Widgets/Input/SSlider.h"
-#include "EditorReimportHandler.h"
-#include "Widgets/Views/SListView.h"
-#include "Widgets/Layout/SScrollBox.h"
-#include "Editor.h"
-#include "PropertyEditorModule.h"
-#include "IDetailsView.h"
-#include "Widgets/Docking/SDockTab.h"
-#include "Engine/Selection.h"
-#include "SAdvancedPreviewDetailsTab.h"
-#include "Math/UnrealMathUtility.h"
-#include "Widgets/Input/SButton.h"
-#include "Widgets/Images/SImage.h"
-
 #include "BlastMeshEditorCommands.h"
 #include "BlastChunkParamsProxy.h"
 #include "BlastMeshEditorModule.h"
@@ -35,19 +11,48 @@
 #include "SBlastChunkTree.h"
 #include "SBlastDepthFilter.h"
 #include "BlastMeshEditorDialogs.h"
-#include "BlastGlobals.h"
 
+#include "Misc/Paths.h"
+#include "Misc/MessageDialog.h"
+#include "EditorDirectories.h"
+#include "DesktopPlatformModule.h"
+#include "Framework/Commands/UICommandList.h"
+#include "FbxImporter.h"
+#include "Factories/FbxStaticMeshImportData.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
+#include "Components/SkinnedMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Modules/ModuleManager.h"
+#include "Widgets/Input/SSlider.h"
+#include "EditorReimportHandler.h"
+#include "Widgets/Views/SListView.h"
+#include "Widgets/Layout/SUniformGridPanel.h"
+#include "Widgets/Input/SNumericEntryBox.h"
+#include "Widgets/Layout/SScrollBox.h"
+#include "Editor.h"
+#include "PropertyEditorModule.h"
+#include "IDetailsView.h"
+#include "Widgets/Docking/SDockTab.h"
+#include "Engine/Selection.h"
+#include "SAdvancedPreviewDetailsTab.h"
+#include "EngineUtils.h"
+#include "Math/UnrealMathUtility.h"
+#include "Widgets/Input/SButton.h"
+#include "EditorStyleSet.h"
+#include "Widgets/Images/SImage.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
+#include "Components/CanvasPanelSlot.h"
 #include "NvBlastExtAuthoringTypes.h"
 
 
 #define LOCTEXT_NAMESPACE "BlastMeshEditor"
 
 const FName FBlastMeshEditor::ChunkHierarchyTabId(TEXT("BlastMeshEditor_ChunkHierarchy"));
-const FName FBlastMeshEditor::ViewportTabId(TEXT("BlastMeshEditor_Viewport"));
-const FName FBlastMeshEditor::PropertiesTabId(TEXT("BlastMeshEditor_Properties"));
-const FName FBlastMeshEditor::FractureSettingsTabId(TEXT("BlastMeshEditor_FractureSettings"));
+const FName FBlastMeshEditor::ViewportTabId( TEXT( "BlastMeshEditor_Viewport" ) );
+const FName FBlastMeshEditor::PropertiesTabId( TEXT( "BlastMeshEditor_Properties" ) );
+const FName FBlastMeshEditor::FractureSettingsTabId( TEXT( "BlastMeshEditor_FractureSettings" ) );
 //const FName FBlastMeshEditor::FractureHistoryTabId(TEXT("BlastMeshEditor_FractureHistory"));
-const FName FBlastMeshEditor::ChunkParametersTabId(TEXT("BlastMeshEditor_ChunkParameters"));
+const FName FBlastMeshEditor::ChunkParametersTabId( TEXT( "BlastMeshEditor_ChunkParameters" ) );
 const FName FBlastMeshEditor::AdvancedPreviewTabId(TEXT("BlastMeshEditor_AdvancedPreview"));
 
 
@@ -55,7 +60,7 @@ static float ExplodeRange = 5.0f;
 
 FBlastMeshEditor::~FBlastMeshEditor()
 {
-	if (FractureSettings && FractureSettings->IsValidLowLevel()
+	if (FractureSettings && FractureSettings->IsValidLowLevel() 
 		&& FractureSettings->FractureSession.IsValid() && Fracturer.IsValid())
 	{
 		Fracturer->FinishFractureSession(FractureSettings->FractureSession);
@@ -67,53 +72,47 @@ FBlastMeshEditor::~FBlastMeshEditor()
 
 void FBlastMeshEditor::RegisterTabSpawners(const TSharedRef<class FTabManager>& InTabManager)
 {
-	WorkspaceMenuCategory = InTabManager->AddLocalWorkspaceMenuCategory(
-		LOCTEXT("WorkspaceMenu_BlastMeshEditor", "Blast Mesh Editor"));
+	WorkspaceMenuCategory = InTabManager->AddLocalWorkspaceMenuCategory(LOCTEXT("WorkspaceMenu_BlastMeshEditor", "Blast Mesh Editor"));
 	auto WorkspaceMenuCategoryRef = WorkspaceMenuCategory.ToSharedRef();
 
 	FAssetEditorToolkit::RegisterTabSpawners(InTabManager);
 
-	InTabManager->RegisterTabSpawner(ChunkHierarchyTabId,
-	                                 FOnSpawnTab::CreateSP(this, &FBlastMeshEditor::SpawnTab_ChunkHierarchy))
-	            .SetDisplayName(LOCTEXT("ChunkHierarchyTab", "Chunks"))
-	            .SetGroup(WorkspaceMenuCategoryRef)
-	            .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "LevelEditor.Tabs.ChunkHierarchy"));
+	InTabManager->RegisterTabSpawner(ChunkHierarchyTabId, FOnSpawnTab::CreateSP(this, &FBlastMeshEditor::SpawnTab_ChunkHierarchy))
+		.SetDisplayName(LOCTEXT("ChunkHierarchyTab", "Chunks"))
+		.SetGroup(WorkspaceMenuCategoryRef)
+		.SetIcon(FSlateIcon(FEditorStyle::GetStyleSetName(), "LevelEditor.Tabs.ChunkHierarchy"));
 
-	InTabManager->RegisterTabSpawner(ViewportTabId, FOnSpawnTab::CreateSP(this, &FBlastMeshEditor::SpawnTab_Viewport))
-	            .SetDisplayName(LOCTEXT("ViewportTab", "Viewport"))
-	            .SetGroup(WorkspaceMenuCategoryRef)
-	            .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "LevelEditor.Tabs.Viewports"));
+	InTabManager->RegisterTabSpawner( ViewportTabId, FOnSpawnTab::CreateSP(this, &FBlastMeshEditor::SpawnTab_Viewport) )
+		.SetDisplayName( LOCTEXT("ViewportTab", "Viewport") )
+		.SetGroup(WorkspaceMenuCategoryRef)
+		.SetIcon(FSlateIcon(FEditorStyle::GetStyleSetName(), "LevelEditor.Tabs.Viewports"));
+		
+	InTabManager->RegisterTabSpawner( PropertiesTabId, FOnSpawnTab::CreateSP(this, &FBlastMeshEditor::SpawnTab_Properties) )
+		.SetDisplayName( LOCTEXT("PropertiesTab", "Blast Settings") )
+		.SetGroup(WorkspaceMenuCategoryRef)
+		.SetIcon(FSlateIcon(FEditorStyle::GetStyleSetName(), "BlastMeshEditor.Tabs.BlastSettings"));
 
-	InTabManager->RegisterTabSpawner(PropertiesTabId,
-	                                 FOnSpawnTab::CreateSP(this, &FBlastMeshEditor::SpawnTab_Properties))
-	            .SetDisplayName(LOCTEXT("PropertiesTab", "Blast Settings"))
-	            .SetGroup(WorkspaceMenuCategoryRef)
-	            .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "BlastMeshEditor.Tabs.BlastSettings"));
-
-	InTabManager->RegisterTabSpawner(FractureSettingsTabId,
-	                                 FOnSpawnTab::CreateSP(this, &FBlastMeshEditor::SpawnTab_FractureSettings))
-	            .SetDisplayName(LOCTEXT("FractureSettingsTab", "Fracture Settings"))
-	            .SetGroup(WorkspaceMenuCategoryRef)
-	            .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "BlastMeshEditor.Tabs.FractureSettings"));
+	InTabManager->RegisterTabSpawner( FractureSettingsTabId, FOnSpawnTab::CreateSP(this, &FBlastMeshEditor::SpawnTab_FractureSettings) )
+		.SetDisplayName( LOCTEXT("FractureSettingsTab", "Fracture Settings") )
+		.SetGroup(WorkspaceMenuCategoryRef)
+		.SetIcon(FSlateIcon(FEditorStyle::GetStyleSetName(), "BlastMeshEditor.Tabs.FractureSettings"));
 
 	//InTabManager->RegisterTabSpawner(FractureHistoryTabId, FOnSpawnTab::CreateSP(this, &FBlastMeshEditor::SpawnTab_FractureHistory))
 	//	.SetDisplayName(LOCTEXT("FractureScriptsTab", "Fracture history"))
 	//	.SetGroup(WorkspaceMenuCategoryRef)
-	//	.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "BlastMeshEditor.Tabs.FractureHistory"));
+	//	.SetIcon(FSlateIcon(FEditorStyle::GetStyleSetName(), "BlastMeshEditor.Tabs.FractureHistory"));
 
-	InTabManager->RegisterTabSpawner(ChunkParametersTabId,
-	                                 FOnSpawnTab::CreateSP(this, &FBlastMeshEditor::SpawnTab_ChunkParameters))
-	            .SetDisplayName(LOCTEXT("ChunkParametersTab", "Chunk Parameters"))
-	            .SetGroup(WorkspaceMenuCategoryRef)
-	            .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "BlastMeshEditor.Tabs.ChunkParameters"));
+	InTabManager->RegisterTabSpawner( ChunkParametersTabId, FOnSpawnTab::CreateSP(this, &FBlastMeshEditor::SpawnTab_ChunkParameters) )
+		.SetDisplayName( LOCTEXT("ChunkParametersTab", "Chunk Parameters") )
+		.SetGroup(WorkspaceMenuCategoryRef)
+		.SetIcon(FSlateIcon(FEditorStyle::GetStyleSetName(), "BlastMeshEditor.Tabs.ChunkParameters"));
 
-	InTabManager->RegisterTabSpawner(AdvancedPreviewTabId,
-	                                 FOnSpawnTab::CreateSP(this, &FBlastMeshEditor::SpawnTab_AdvancedPreview))
-	            .SetDisplayName(NSLOCTEXT("PersonaModes", "PreviewSceneSettingsTab", "Preview Scene Settings"))
-	            .SetGroup(WorkspaceMenuCategoryRef)
-	            .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "LevelEditor.Tabs.Details"))
-	            .SetTooltipText(NSLOCTEXT("PersonaModes", "AdvancedPreviewSettingsToolTip",
-	                                      "The Advanced Preview Settings tab will let you alter the preview scene's settings."));
+	InTabManager->RegisterTabSpawner(AdvancedPreviewTabId, FOnSpawnTab::CreateSP(this, &FBlastMeshEditor::SpawnTab_AdvancedPreview))
+		.SetDisplayName(NSLOCTEXT("PersonaModes", "PreviewSceneSettingsTab", "Preview Scene Settings"))
+		.SetGroup(WorkspaceMenuCategoryRef)
+		.SetIcon(FSlateIcon(FEditorStyle::GetStyleSetName(), "LevelEditor.Tabs.Details"))
+		.SetTooltipText(NSLOCTEXT("PersonaModes", "AdvancedPreviewSettingsToolTip", "The Advanced Preview Settings tab will let you alter the preview scene's settings."));
+
 }
 
 void FBlastMeshEditor::UnregisterTabSpawners(const TSharedRef<class FTabManager>& InTabManager)
@@ -129,9 +128,7 @@ void FBlastMeshEditor::UnregisterTabSpawners(const TSharedRef<class FTabManager>
 	InTabManager->UnregisterTabSpawner(AdvancedPreviewTabId);
 }
 
-void FBlastMeshEditor::InitBlastMeshEditor(const EToolkitMode::Type Mode,
-                                           const TSharedPtr<class IToolkitHost>& InitToolkitHost,
-                                           UBlastMesh* InBlastMesh)
+void FBlastMeshEditor::InitBlastMeshEditor( const EToolkitMode::Type Mode, const TSharedPtr< class IToolkitHost >& InitToolkitHost, UBlastMesh* InBlastMesh )
 {
 	FReimportManager::Instance()->OnPostReimport().AddRaw(this, &FBlastMeshEditor::OnPostReimport);
 
@@ -149,7 +146,7 @@ void FBlastMeshEditor::InitBlastMeshEditor(const EToolkitMode::Type Mode,
 	Viewport = SNew(SBlastMeshEditorViewport)
 	.BlastMeshEditor(SharedThis(this))
 	.ObjectToEdit(InBlastMesh);
-
+	
 	FDetailsViewArgs Args;
 	Args.bLockable = false;
 	Args.bHideSelectionTip = true;
@@ -157,7 +154,7 @@ void FBlastMeshEditor::InitBlastMeshEditor(const EToolkitMode::Type Mode,
 
 	FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
 	BlastMeshDetailsView = PropertyModule.CreateDetailView(Args);
-	BlastMeshDetailsView->SetObject(InBlastMesh);
+	BlastMeshDetailsView->SetObject( InBlastMesh );
 
 	Fracturer = FBlastFracture::GetInstance();
 	FractureSettings = Fracturer->CreateFractureSettings(this);
@@ -169,7 +166,7 @@ void FBlastMeshEditor::InitBlastMeshEditor(const EToolkitMode::Type Mode,
 
 	FractureSettings->OnFractureMethodChanged.BindSP(this, &FBlastMeshEditor::OnFractureMethodChanged);
 	FractureSettings->OnMaterialSelected.BindSP(this, &FBlastMeshEditor::OnBlastMeshReloaded);
-
+	
 	ChunkParametersView = PropertyModule.CreateDetailView(Args);
 	ChunkParametersView->SetObject(NULL, false);
 
@@ -179,67 +176,64 @@ void FBlastMeshEditor::InitBlastMeshEditor(const EToolkitMode::Type Mode,
 	//	.OnGenerateRow(this, &FBlastMeshEditor::OnGenerateRowForFractureHistory);
 
 
-	const TSharedRef<FTabManager::FLayout> StandaloneDefaultLayout = FTabManager::NewLayout(
-			"Standalone_BlastMeshEditor_Layout_v4.1")
-		->AddArea
+	const TSharedRef<FTabManager::FLayout> StandaloneDefaultLayout = FTabManager::NewLayout( "Standalone_BlastMeshEditor_Layout_v4.1" )
+	->AddArea
+	(
+		FTabManager::NewPrimaryArea() ->SetOrientation(Orient_Vertical)
+		->Split
 		(
-			FTabManager::NewPrimaryArea()->SetOrientation(Orient_Vertical)
-			                             ->Split
-			                             (
-				                             FTabManager::NewSplitter()
-				                             ->SetOrientation(Orient_Horizontal)->SetSizeCoefficient(0.9f)
-				                             ->Split
-				                             (
-					                             FTabManager::NewStack()
-					                             ->SetSizeCoefficient(0.15f)
-					                             ->AddTab(ChunkHierarchyTabId, ETabState::OpenedTab)->SetHideTabWell(
-						                             true)
-				                             )
-				                             ->Split
-				                             (
-					                             FTabManager::NewStack()
-					                             ->SetSizeCoefficient(0.5f)
-					                             ->AddTab(ViewportTabId, ETabState::OpenedTab)->SetHideTabWell(true)
-				                             )
-				                             ->Split
-				                             (
-					                             FTabManager::NewSplitter()
-					                             ->SetOrientation(Orient_Vertical)->SetSizeCoefficient(0.35f)
-					                             ->Split
-					                             (
-						                             FTabManager::NewSplitter()
-						                             ->SetOrientation(Orient_Horizontal)->SetSizeCoefficient(0.5f)
-						                             ->Split
-						                             (
-							                             FTabManager::NewStack()
-							                             ->SetSizeCoefficient(0.5f)
-							                             ->AddTab(PropertiesTabId, ETabState::OpenedTab)
-							                             ->AddTab(ChunkParametersTabId, ETabState::OpenedTab)
-							                             ->AddTab(AdvancedPreviewTabId, ETabState::OpenedTab)
-							                             ->SetForegroundTab(PropertiesTabId)
-						                             )
-					                             )
-					                             //->Split
-					                             //(
-					                             //	FTabManager::NewStack()
-					                             //	->SetSizeCoefficient(0.55f)
-					                             //	->AddTab(FractureSettingsTabId, ETabState::OpenedTab)
-					                             //	->AddTab(FractureHistoryTabId, ETabState::OpenedTab)
-					                             //)
-				                             )
-			                             )
-		);
+			FTabManager::NewStack()
+			->SetSizeCoefficient(0.1f)
+			->AddTab(GetToolbarTabId(), ETabState::OpenedTab) ->SetHideTabWell(true)
+		)
+		->Split
+		(
+			FTabManager::NewSplitter() ->SetOrientation(Orient_Horizontal) ->SetSizeCoefficient(0.9f)
+			->Split
+			(
+				FTabManager::NewStack()
+				->SetSizeCoefficient(0.15f)
+				->AddTab(ChunkHierarchyTabId, ETabState::OpenedTab)->SetHideTabWell(true)
+			)
+			->Split
+			(
+				FTabManager::NewStack()
+				->SetSizeCoefficient(0.5f)
+				->AddTab(ViewportTabId, ETabState::OpenedTab) ->SetHideTabWell(true)
+			)
+			->Split
+			(
+				FTabManager::NewSplitter() ->SetOrientation(Orient_Vertical) ->SetSizeCoefficient(0.35f)
+				->Split
+				(
+					FTabManager::NewSplitter() ->SetOrientation(Orient_Horizontal) ->SetSizeCoefficient(0.5f)
+					->Split
+					(
+						FTabManager::NewStack()
+						->SetSizeCoefficient(0.5f)
+						->AddTab(PropertiesTabId, ETabState::OpenedTab)
+						->AddTab(ChunkParametersTabId, ETabState::OpenedTab)
+						->AddTab(AdvancedPreviewTabId, ETabState::OpenedTab)
+						->SetForegroundTab(PropertiesTabId)
+					)
+				)
+				//->Split
+				//(
+				//	FTabManager::NewStack()
+				//	->SetSizeCoefficient(0.55f)
+				//	->AddTab(FractureSettingsTabId, ETabState::OpenedTab)
+				//	->AddTab(FractureHistoryTabId, ETabState::OpenedTab)
+				//)
+			)
+		)
+	);
 
 	const bool bCreateDefaultStandaloneMenu = true;
 	const bool bCreateDefaultToolbar = true;
-	FAssetEditorToolkit::InitAssetEditor(Mode, InitToolkitHost, BlastMeshEditorAppIdentifier, StandaloneDefaultLayout,
-	                                     bCreateDefaultStandaloneMenu, bCreateDefaultToolbar, InBlastMesh);
+	FAssetEditorToolkit::InitAssetEditor( Mode, InitToolkitHost, BlastMeshEditorAppIdentifier, StandaloneDefaultLayout, bCreateDefaultStandaloneMenu, bCreateDefaultToolbar, InBlastMesh );
 
-	FBlastMeshEditorModule& BlastMeshEditorModule = FModuleManager::LoadModuleChecked<FBlastMeshEditorModule>(
-		"BlastMeshEditor");
-	AddMenuExtender(
-		BlastMeshEditorModule.GetMenuExtensibilityManager()->GetAllExtenders(
-			GetToolkitCommands(), GetEditingObjects()));
+	FBlastMeshEditorModule& BlastMeshEditorModule = FModuleManager::LoadModuleChecked<FBlastMeshEditorModule>( "BlastMeshEditor" );
+	AddMenuExtender(BlastMeshEditorModule.GetMenuExtensibilityManager()->GetAllExtenders(GetToolkitCommands(), GetEditingObjects()));
 
 	ExtendToolbar();
 
@@ -260,23 +254,23 @@ TSharedRef<SDockTab> FBlastMeshEditor::SpawnTab_ChunkHierarchy(const FSpawnTabAr
 		];
 }
 
-TSharedRef<SDockTab> FBlastMeshEditor::SpawnTab_Viewport(const FSpawnTabArgs& Args)
+TSharedRef<SDockTab> FBlastMeshEditor::SpawnTab_Viewport( const FSpawnTabArgs& Args )
 {
-	check(Args.GetTabId() == ViewportTabId);
+	check( Args.GetTabId() == ViewportTabId );
 
 	return SNew(SDockTab)
-		.Label(LOCTEXT("BlastMeshViewport_TabTitle", "Viewport"))
+		.Label( LOCTEXT("BlastMeshViewport_TabTitle", "Viewport") )
 		[
 			Viewport.ToSharedRef()
 		];
 }
 
-TSharedRef<SDockTab> FBlastMeshEditor::SpawnTab_Properties(const FSpawnTabArgs& Args)
+TSharedRef<SDockTab> FBlastMeshEditor::SpawnTab_Properties( const FSpawnTabArgs& Args )
 {
-	check(Args.GetTabId() == PropertiesTabId);
+	check( Args.GetTabId() == PropertiesTabId );
 
 	BlastMeshDetailsViewTab = SNew(SDockTab)
-		.Label(LOCTEXT("BlastMeshProperties_TabTitle", "Blast Settings"))
+		.Label( LOCTEXT("BlastMeshProperties_TabTitle", "Blast Settings") )
 		[
 			BlastMeshDetailsView.ToSharedRef()
 		];
@@ -284,12 +278,12 @@ TSharedRef<SDockTab> FBlastMeshEditor::SpawnTab_Properties(const FSpawnTabArgs& 
 	return BlastMeshDetailsViewTab.ToSharedRef();
 }
 
-TSharedRef<SDockTab> FBlastMeshEditor::SpawnTab_FractureSettings(const FSpawnTabArgs& Args)
+TSharedRef<SDockTab> FBlastMeshEditor::SpawnTab_FractureSettings( const FSpawnTabArgs& Args )
 {
-	check(Args.GetTabId() == FractureSettingsTabId);
+	check( Args.GetTabId() == FractureSettingsTabId );
 
 	return SNew(SDockTab)
-		.Label(LOCTEXT("BlastMeshFractureSettings_TabTitle", "Fracture Settings"))
+		.Label( LOCTEXT("BlastMeshFractureSettings_TabTitle", "Fracture Settings") )
 		[
 			SNew(SScrollBox)
 			+ SScrollBox::Slot()
@@ -316,12 +310,12 @@ TSharedRef<SDockTab> FBlastMeshEditor::SpawnTab_FractureSettings(const FSpawnTab
 //		];
 //}
 
-TSharedRef<SDockTab> FBlastMeshEditor::SpawnTab_ChunkParameters(const FSpawnTabArgs& Args)
+TSharedRef<SDockTab> FBlastMeshEditor::SpawnTab_ChunkParameters( const FSpawnTabArgs& Args )
 {
-	check(Args.GetTabId() == ChunkParametersTabId);
+	check( Args.GetTabId() == ChunkParametersTabId );
 
 	ChunkParametersViewTab = SNew(SDockTab)
-		.Label(LOCTEXT("BlastMeshChunkParameters_TabTitle", "Chunk Parameters"))
+		.Label( LOCTEXT("BlastMeshChunkParameters_TabTitle", "Chunk Parameters") )
 		[
 			ChunkParametersView.ToSharedRef()
 		];
@@ -348,7 +342,7 @@ FName FBlastMeshEditor::GetToolkitFName() const
 
 FText FBlastMeshEditor::GetBaseToolkitName() const
 {
-	return LOCTEXT("AppLabel", "BlastMesh Editor");
+	return LOCTEXT( "AppLabel", "BlastMesh Editor" );
 }
 
 FString FBlastMeshEditor::GetWorldCentricTabPrefix() const
@@ -358,7 +352,7 @@ FString FBlastMeshEditor::GetWorldCentricTabPrefix() const
 
 FLinearColor FBlastMeshEditor::GetWorldCentricTabColorScale() const
 {
-	return FLinearColor(0.0f, 0.0f, 0.2f, 0.5f);
+	return FLinearColor( 0.0f, 0.0f, 0.2f, 0.5f );
 }
 
 void FBlastMeshEditor::BindCommands()
@@ -375,8 +369,7 @@ void FBlastMeshEditor::BindCommands()
 
 	UICommandList->MapAction(
 		Commands.Reset,
-		FExecuteAction::CreateSP<FBlastMeshEditor, int32>(this, &FBlastMeshEditor::RemoveSubhierarchy, INDEX_NONE,
-		                                                  false),
+		FExecuteAction::CreateSP<FBlastMeshEditor, int32>(this, &FBlastMeshEditor::RemoveSubhierarchy, INDEX_NONE, false),
 		FCanExecuteAction::CreateSP(this, &FBlastMeshEditor::IsFractured),
 		FIsActionChecked());
 
@@ -417,21 +410,8 @@ void FBlastMeshEditor::BindCommands()
 		FIsActionChecked());
 
 	UICommandList->MapAction(
-		Commands.CopyCollisionMeshToChunk,
-		FExecuteAction::CreateSP(this, &FBlastMeshEditor::CopyCollisionMeshToChunk),
-		FCanExecuteAction::CreateSP(this, &FBlastMeshEditor::IsFractured),
-		FIsActionChecked());
-
-	UICommandList->MapAction(
 		Commands.ImportRootFromStaticMesh,
 		FExecuteAction::CreateSP(this, &FBlastMeshEditor::ImportRootFromStaticMesh),
-		FCanExecuteAction::CreateSP(this, &FBlastMeshEditor::CanImportRootFromStaticMesh),
-		FCanExecuteAction(),
-		FIsActionChecked());
-
-	UICommandList->MapAction(
-		Commands.ImportRootFromFbx,
-		FExecuteAction::CreateSP(this, &FBlastMeshEditor::ImportRootFromFBXDialog),
 		FCanExecuteAction::CreateSP(this, &FBlastMeshEditor::CanImportRootFromStaticMesh),
 		FCanExecuteAction(),
 		FIsActionChecked());
@@ -451,40 +431,40 @@ void FBlastMeshEditor::BindCommands()
 		FIsActionChecked());
 }
 
-void FillCommandToolbar(FToolBarBuilder& ToolbarBuilder, TSharedRef<SWidget> PreviewBox,
-                        TSharedRef<SWidget> ExplodeBox/*, TSharedRef<SWidget> FractureScriptsWidget*/)
-{
-	ToolbarBuilder.BeginSection("Toolbar");
-	{
-		ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().Fracture);
-		ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().Undo);
-		ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().Redo);
-		ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().Reset);
-		ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().FixChunkHierarchy);
-		//ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().Refresh);
-		ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().ImportRootFromStaticMesh);
-		ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().ImportRootFromFbx);
-		ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().FitUvCoordinates);
-		ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().ChunksFromIslands);
-		ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().RebuildCollisionMesh);
-		ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().CopyCollisionMeshToChunk);
-		ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().ExportAssetToFile);
-
-		ToolbarBuilder.AddWidget(PreviewBox);
-		ToolbarBuilder.AddWidget(ExplodeBox);
-	}
-	ToolbarBuilder.EndSection();
-}
-
 void FBlastMeshEditor::ExtendToolbar()
 {
+	struct Local
+	{
+		static void FillToolbar(FToolBarBuilder& ToolbarBuilder, TSharedRef<SWidget> PreviewBox, TSharedRef<SWidget> ExplodeBox/*, TSharedRef<SWidget> FractureScriptsWidget*/)
+		{
+			ToolbarBuilder.BeginSection("Toolbar");
+			{
+				ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().Fracture);
+				ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().Undo);
+				ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().Redo);
+				ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().Reset);
+				ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().FixChunkHierarchy);
+				//ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().Refresh);
+				ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().ImportRootFromStaticMesh);
+				ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().FitUvCoordinates);
+				ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().ChunksFromIslands);
+				ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().RebuildCollisionMesh);
+				ToolbarBuilder.AddToolBarButton(FBlastMeshEditorCommands::Get().ExportAssetToFile);
+
+				ToolbarBuilder.AddWidget(PreviewBox);
+				ToolbarBuilder.AddWidget(ExplodeBox);
+			}
+			ToolbarBuilder.EndSection();
+		}
+	};
+
 	TSharedPtr<FExtender> ToolbarExtender = MakeShareable(new FExtender);
 
 	TSharedRef<SWidget> PreviewBox = SNew(SHorizontalBox)
-		+ SHorizontalBox::Slot()
-		  .AutoWidth()
-		  .Padding(4, 0)
-		  .VAlign(VAlign_Center)
+		+SHorizontalBox::Slot()
+		.AutoWidth()
+		.Padding(4,0)
+		.VAlign(VAlign_Center)
 		[
 			SAssignNew(PreviewDepthWidget, SBlastDepthFilter)
 			.Text(LOCTEXT("BlastMeshEditor_PreviewDepth", "Preview Depth:"))
@@ -493,43 +473,43 @@ void FBlastMeshEditor::ExtendToolbar()
 		];
 
 	TSharedRef<SWidget> ExplodeBox = SNew(SHorizontalBox)
-		+ SHorizontalBox::Slot()
-		  .AutoWidth()
-		  .Padding(FMargin(8.0f, 2.0f, 8.0f, 2.0f))
-		  .HAlign(HAlign_Left)
+		+SHorizontalBox::Slot()
+		.AutoWidth()
+		.Padding( FMargin(8.0f, 2.0f, 8.0f, 2.0f) )
+		.HAlign( HAlign_Left )
 		[
-			SNew(SVerticalBox)
-			.AddMetaData<FTagMetaData>(TEXT("Blast.ExplodeAmount"))
+			SNew( SVerticalBox )
+			.AddMetaData<FTagMetaData>(TEXT("Blast.ExplodeAmount")) 
 			+ SVerticalBox::Slot()
-			  .AutoHeight()
-			  .Padding(FMargin(40.0f, 0.0f))
-			  .HAlign(HAlign_Center)
+			.AutoHeight()
+			.Padding( FMargin(40.0f, 0.0f) )
+			.HAlign(HAlign_Center)
 			[
-				SNew(STextBlock)
-				.Text(LOCTEXT("ExplodeAmount", "Explode Amount"))
-				.Font(FAppStyle::GetFontStyle(TEXT("MenuItem.Font")))
+				SNew( STextBlock )
+				.Text( LOCTEXT("ExplodeAmount", "Explode Amount")  )
+				.Font( FEditorStyle::GetFontStyle( TEXT( "MenuItem.Font" ) ) )
 			]
-			+ SVerticalBox::Slot()
-			  .AutoHeight()
-			  .Padding(FMargin(8.0f, 4.0f))
-			[
-				SNew(SHorizontalBox)
-				+ SHorizontalBox::Slot()
-				  .MaxWidth(200.0f)
-				  .FillWidth(1)
-				  .Padding(FMargin(0.0f, 2.0f))
+			+SVerticalBox::Slot()
+			.AutoHeight()
+			.Padding( FMargin(8.0f, 4.0f) )
+			[	
+				SNew( SHorizontalBox )
+				+SHorizontalBox::Slot()
+				.MaxWidth(200.0f)
+				.FillWidth(1)
+				.Padding( FMargin(0.0f, 2.0f) )
 				[
 					SAssignNew(ExplodeAmountSlider, SSlider)
 					.Value(this, &FBlastMeshEditor::GetExplodeAmountSliderPosition)
 					.OnValueChanged(this, &FBlastMeshEditor::OnSetExplodeAmount)
 				]
-				+ SHorizontalBox::Slot()
-				  .AutoWidth()
-				  .Padding(8.0f, 2.0f, 0.0f, 2.0f)
+				+SHorizontalBox::Slot()
+				.AutoWidth()
+				.Padding( 8.0f, 2.0f, 0.0f, 2.0f)
 				[
-					SNew(STextBlock)
-					.Text(this, &FBlastMeshEditor::GetButtonLabel)
-					.Font(FAppStyle::GetFontStyle(TEXT("MenuItem.Font")))
+					SNew( STextBlock )
+					.Text(this, &FBlastMeshEditor::GetButtonLabel )
+					.Font( FEditorStyle::GetFontStyle( TEXT( "MenuItem.Font" ) ) )
 				]
 			]
 		];
@@ -541,14 +521,12 @@ void FBlastMeshEditor::ExtendToolbar()
 		"Asset",
 		EExtensionHook::After,
 		GetToolkitCommands(),
-		FToolBarExtensionDelegate::CreateStatic(&FillCommandToolbar, PreviewBox,
-		                                        ExplodeBox /*, FractureScriptsWidget.ToSharedRef()*/)
-	);
+		FToolBarExtensionDelegate::CreateStatic(&Local::FillToolbar, PreviewBox, ExplodeBox /*, FractureScriptsWidget.ToSharedRef()*/)
+		);
 
 	AddToolbarExtender(ToolbarExtender);
 
-	FBlastMeshEditorModule& BlastMeshEditorModule = FModuleManager::LoadModuleChecked<FBlastMeshEditorModule>(
-		"BlastMeshEditor");
+	FBlastMeshEditorModule& BlastMeshEditorModule = FModuleManager::LoadModuleChecked<FBlastMeshEditorModule>( "BlastMeshEditor" );
 	AddToolbarExtender(BlastMeshEditorModule.GetToolBarExtensibilityManager()->GetAllExtenders());
 }
 
@@ -578,11 +556,10 @@ void FBlastMeshEditor::SetBlastMesh(UBlastMesh* InBlastMesh)
 	if (PreviewDepthWidget.IsValid())
 	{
 		PreviewDepthWidget->SetBlastMesh(BlastMesh);
-		PreviewDepthWidget->SetSelectedDepths(TArray<int32>({FBlastMeshEditorModule::MaxChunkDepth}));
+		PreviewDepthWidget->SetSelectedDepths(TArray<int32>({ FBlastMeshEditorModule::MaxChunkDepth }));
 	}
-
 	if (BlastMesh)
-	{
+	{		
 		if (BlastMesh->Mesh)
 		{
 			if (FractureSettings->FractureSession.IsValid())
@@ -590,8 +567,7 @@ void FBlastMeshEditor::SetBlastMesh(UBlastMesh* InBlastMesh)
 				Fracturer->FinishFractureSession(FractureSettings->FractureSession);
 				FractureSettings->Reset();
 			}
-			FractureSettings->FractureSession = Fracturer->StartFractureSession(
-				InBlastMesh, nullptr, false, FractureSettings);
+			FractureSettings->FractureSession = Fracturer->StartFractureSession(InBlastMesh, nullptr, FractureSettings);
 		}
 	}
 
@@ -603,7 +579,7 @@ void FBlastMeshEditor::OnChangeMesh()
 {
 	FEditorDelegates::LoadSelectedAssetsIfNeeded.Broadcast();
 	UBlastMesh* SelectedMesh = GEditor->GetSelectedObjects()->GetTop<UBlastMesh>();
-	if (SelectedMesh && SelectedMesh != BlastMesh)
+	if(SelectedMesh && SelectedMesh != BlastMesh)
 	{
 		RemoveEditingObject(BlastMesh);
 		AddEditingObject(SelectedMesh);
@@ -616,18 +592,18 @@ void FBlastMeshEditor::OnChangeMesh()
 void FBlastMeshEditor::OnPostReimport(UObject* InObject, bool bSuccess)
 {
 	// Ignore if this is regarding a different object
-	if (InObject != BlastMesh)
+	if ( InObject != BlastMesh )
 	{
 		return;
 	}
 
-	if (bSuccess)
+	if ( bSuccess )
 	{
 		RefreshTool();
 	}
 }
 
-UBlastMesh* FBlastMeshEditor::GetBlastMesh()
+UBlastMesh* FBlastMeshEditor::GetBlastMesh() 
 {
 	return BlastMesh;
 }
@@ -652,10 +628,10 @@ void FBlastMeshEditor::RefreshTool()
 		FString ChunkName = FString::FormatAsNumber(ChunkIndex)
 			+ TEXT(", depth: ") + FString::FormatAsNumber(BlastMesh->GetChunkDepth(ChunkIndex));
 		FBlastChunkEditorModelPtr Model(new FBlastChunkEditorModel(FName(*ChunkName), false, ChunkIndex,
-		                                                           BlastMesh->IsSupportChunk(ChunkIndex),
-		                                                           BlastMesh->IsChunkStatic(ChunkIndex)));
-		Fracturer->GetVoronoiSites(FractureSettings->FractureSession, ChunkIndex, Model->VoronoiSites);
-		Model->bBold = !Model->VoronoiSites.IsEmpty();
+			BlastMesh->IsSupportChunk(ChunkIndex), BlastMesh->IsChunkStatic(ChunkIndex)));
+		Model->VoronoiSites = MakeShared<TArray<FVector>>();
+		Fracturer->GetVoronoiSites(FractureSettings->FractureSession, Model->ChunkIndex, *Model->VoronoiSites);
+		Model->bBold = Model->VoronoiSites->Num() > 0;
 		ChunkEditorModels.Add(Model);
 	}
 
@@ -663,9 +639,8 @@ void FBlastMeshEditor::RefreshTool()
 	{
 		ChunkHierarchy->GetRootChunks().Add(ChunkEditorModels[BlastMesh->GetRootChunks()[i]]);
 	}
-
-	FractureSettings->FractureSession->IsRootFractured = FractureSettings->FractureSession->FractureData.IsValid() &&
-		BlastMesh->GetChunkCount() > (uint32)BlastMesh->GetRootChunks().Num();
+	
+	FractureSettings->FractureSession->IsRootFractured = FractureSettings->FractureSession->FractureData.IsValid() && BlastMesh->GetChunkCount() > (uint32)BlastMesh->GetRootChunks().Num();
 
 	ChunkHierarchy->Refresh();
 	PreviewDepthWidget->Refresh();
@@ -680,12 +655,12 @@ void FBlastMeshEditor::RefreshViewport()
 FText FBlastMeshEditor::GetButtonLabel() const
 {
 	static const FNumberFormattingOptions FormatOptions = FNumberFormattingOptions()
-	                                                      .SetMinimumFractionalDigits(1)
-	                                                      .SetMaximumFractionalDigits(1);
-	return FText::AsNumber(ExplodeFractionOfRange * ExplodeRange, &FormatOptions);
+		.SetMinimumFractionalDigits(1)
+		.SetMaximumFractionalDigits(1);
+	return FText::AsNumber( ExplodeFractionOfRange*ExplodeRange, &FormatOptions );
 }
 
-void FBlastMeshEditor::PreviewDepthSelectionChanged(int32 NewPreviewDepth)
+void FBlastMeshEditor::PreviewDepthSelectionChanged( int32 NewPreviewDepth )
 {
 	if (PreviewDepthWidget.IsValid())
 	{
@@ -694,10 +669,9 @@ void FBlastMeshEditor::PreviewDepthSelectionChanged(int32 NewPreviewDepth)
 			int32 Depth = BlastMesh->GetChunkDepth(ChunkModel->ChunkIndex);
 			auto& chunkInfo = BlastMesh->GetChunkInfo(ChunkModel->ChunkIndex);
 			ChunkModel->bVisible = (Depth == NewPreviewDepth
-				|| (NewPreviewDepth == FBlastMeshEditorModule::MaxChunkDepth && (chunkInfo.childIndexStop - chunkInfo.
-					firstChildIndex == 0)));
+				|| (NewPreviewDepth == FBlastMeshEditorModule::MaxChunkDepth && (chunkInfo.childIndexStop - chunkInfo.firstChildIndex == 0)));
 		}
-
+		
 		ChunkHierarchy->Refresh();
 		ChunkHierarchy->UpdateSelection();
 		Viewport->RefreshViewport();
@@ -712,7 +686,7 @@ float FBlastMeshEditor::GetExplodeAmountSliderPosition() const
 void FBlastMeshEditor::OnSetExplodeAmount(float NewValue)
 {
 	ExplodeFractionOfRange = NewValue;
-	Viewport->SetExplodeAmount(ExplodeFractionOfRange * ExplodeRange);
+	Viewport->SetExplodeAmount(ExplodeFractionOfRange*ExplodeRange);
 }
 
 void FBlastMeshEditor::UpdateChunkSelection()
@@ -738,8 +712,8 @@ void FBlastMeshEditor::UpdateChunkSelection()
 
 		Proxy->BlastMesh = GetBlastMesh();
 		Proxy->ChunkIndex = ChunkIndex;
+		Proxy->ChunkCentroid = FVector(reinterpret_cast<const FVector&>(Proxy->BlastMesh->GetChunkInfo(Proxy->ChunkIndex)));
 		const NvBlastChunk& ChunkInfo = Proxy->BlastMesh->GetChunkInfo(Proxy->ChunkIndex);
-		Proxy->ChunkCentroid = FromNvVector(ChunkInfo.centroid);
 		Proxy->ChunkVolume = ChunkInfo.volume;
 		//Proxy->BlastMeshEditorPtr = this;
 
@@ -812,11 +786,6 @@ void FBlastMeshEditor::AddReferencedObjects(FReferenceCollector& Collector)
 	Collector.AddReferencedObject(FractureSettings);
 	Collector.AddReferencedObjects(SelectedChunks);
 	Collector.AddReferencedObjects(UnusedProxies);
-}
-
-FString FBlastMeshEditor::GetReferencerName() const
-{
-	return TEXT("FBlastMeshEditor");
 }
 
 //TSharedRef<ITableRow> FBlastMeshEditor::OnGenerateRowForFractureHistory(TSharedPtr<FString> InItem, const TSharedRef<STableViewBase>& OwnerTable)
@@ -965,85 +934,26 @@ bool FBlastMeshEditor::CanRedoFracture()
 
 void FBlastMeshEditor::ImportRootFromStaticMesh()
 {
-	if (!BlastMesh)
+	if (BlastMesh)
 	{
-		return;
-	}
-	
-	const SSelectStaticMeshDialog::FLoadMeshResult LoadResult = SSelectStaticMeshDialog::ShowWindow();
-	if (LoadResult.Mesh)
-	{
-		FTextBuilder TextBuilder;
-		TextBuilder.AppendLine(LOCTEXT("BlastMeshEditor_IsReplaceSourceMesh",
-		                               "Source mesh already exist. Do you want replace it with selected static mesh?"));
-		if (BlastMesh->Mesh == nullptr || FMessageDialog::Open(EAppMsgType::YesNo, TextBuilder.ToText()) ==
-			EAppReturnType::Yes)
+		UStaticMesh* SourceStaticMesh = SSelectStaticMeshDialog::ShowWindow();
+		if (SourceStaticMesh)
 		{
-			if (FractureSettings->FractureSession.IsValid())
+			FTextBuilder TextBuilder;
+			TextBuilder.AppendLine(LOCTEXT("BlastMeshEditor_IsReplaceSourceMesh", "Source mesh already exist. Do you want replace it with seleted static mesh?"));
+			if (BlastMesh->Mesh == nullptr || FMessageDialog::Open(EAppMsgType::YesNo, TextBuilder.ToText()) == EAppReturnType::Yes)
 			{
-				Fracturer->FinishFractureSession(FractureSettings->FractureSession);
-				FractureSettings->Reset();
+				if (FractureSettings->FractureSession.IsValid())
+				{
+					Fracturer->FinishFractureSession(FractureSettings->FractureSession);
+					FractureSettings->Reset();
+				}
+				FractureSettings->FractureSession = Fracturer->StartFractureSession(BlastMesh, SourceStaticMesh, FractureSettings);
+				SelectedChunkIndices.Empty();
+				OnBlastMeshReloaded();
+				Viewport->ResetCamera();
 			}
-			FractureSettings->FractureSession = Fracturer->StartFractureSession(
-				BlastMesh, LoadResult.Mesh, LoadResult.bCleanMesh, FractureSettings);
-			SelectedChunkIndices.Empty();
-			OnBlastMeshReloaded();
-			Viewport->ResetCamera();
 		}
-	}
-}
-
-void FBlastMeshEditor::ImportRootFromFBX(const FString& InFilePath, bool bCleanMesh)
-{
-	if (!Fracturer || !BlastMesh)
-	{
-		UE_LOG(LogBlastMeshEditor, Error, TEXT("Blast not initialized correctly, cannot import root chunk"));
-		return;
-	}
-	
-	
-	FTextBuilder TextBuilder;
-	TextBuilder.AppendLine(LOCTEXT("BlastMeshEditor_IsReplaceSourceMesh",
-								   "Source mesh already exist. Do you want replace it with selected static mesh?"));
-	if (!BlastMesh->Mesh || FMessageDialog::Open(EAppMsgType::YesNo, TextBuilder.ToText()) == EAppReturnType::Yes)
-	{
-		if (Fracturer->ImportRootChunk(BlastMesh, FractureSettings, InFilePath, bCleanMesh))
-		{
-			SelectedChunkIndices.Empty();
-			OnBlastMeshReloaded();
-			Viewport->ResetCamera();
-		}
-	}
-}
-
-void FBlastMeshEditor::ImportRootFromFBXDialog()
-{
-	IDesktopPlatform* DesktopPlatform = FDesktopPlatformModule::Get();
-	const void* ParentWindowWindowHandle = FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr);
-
-	const FText Title = LOCTEXT("ImportRootChunkFromFBX", "Import chunk from FBX...");
-	const FString FileTypes = TEXT("Autodesk FBX (*.fbx)|*.fbx");
-
-	TArray<FString> OutFilenames;
-	DesktopPlatform->OpenFileDialog(
-		ParentWindowWindowHandle,
-		Title.ToString(),
-		{},
-		{},
-		FileTypes,
-		EFileDialogFlags::None,
-		OutFilenames
-	);
-
-	if (OutFilenames.IsEmpty())
-	{
-		return;
-	}
-
-	const TOptional<SBlastRootImportSettingsDialog::FImportSettingsResult> LoadResult = SBlastRootImportSettingsDialog::ShowWindow();
-	if (LoadResult)
-	{
-		ImportRootFromFBX(OutFilenames[0], LoadResult->bCleanMesh);
 	}
 }
 
@@ -1067,15 +977,13 @@ bool FBlastMeshEditor::CanImportRootFromStaticMesh()
 }
 
 bool FBlastMeshEditor::IsFractured()
-{
-	return FractureSettings->FractureSession.IsValid() && FractureSettings->FractureSession->FractureData.IsValid() &&
-		FractureSettings->FractureSession->FractureData->chunkCount > 1;
+{ 
+	return FractureSettings->FractureSession.IsValid() && FractureSettings->FractureSession->FractureData.IsValid() && FractureSettings->FractureSession->FractureData->chunkCount > 1; 
 }
 
 void FBlastMeshEditor::FixChunkHierarchy()
 {
-	if (FractureSettings->FractureSession->IsRootFractured && SFixChunkHierarchyDialog::ShowWindow(
-		Fracturer, FractureSettings, SelectedChunkIndices))
+	if (FractureSettings->FractureSession->IsRootFractured && SFixChunkHierarchyDialog::ShowWindow(Fracturer, FractureSettings, SelectedChunkIndices))
 	{
 		OnBlastMeshReloaded();
 	}
@@ -1112,14 +1020,6 @@ void FBlastMeshEditor::SplitIslandsToChunks()
 void FBlastMeshEditor::RebuildCollisionMesh()
 {
 	if (SRebuildCollisionMeshDialog::ShowWindow(Fracturer, FractureSettings, SelectedChunkIndices))
-	{
-		//OnBlastMeshReloaded();
-	}
-}
-
-void FBlastMeshEditor::CopyCollisionMeshToChunk()
-{
-	if (SCopyCollisionMeshToChunkDialog::ShowWindow(BlastMesh, SelectedChunkIndices))
 	{
 		//OnBlastMeshReloaded();
 	}

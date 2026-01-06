@@ -19,11 +19,9 @@ namespace UnrealBuildTool.Rules
                 }
             );
 
-            string[] BlastLibs =
-            {
-            };
+            string[] BlastLibs = { };
 
-            Blast.SetupModuleBlastSupport(this, BlastLibs);
+            Blast.SetupModuleBlastSupport(this, BlastLibs, null);
         }
     }
 }

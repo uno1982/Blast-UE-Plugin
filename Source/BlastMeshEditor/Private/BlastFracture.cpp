@@ -1,16 +1,20 @@
 // Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
 
 #include "BlastFracture.h"
+#include "BlastFractureSettings.h"
+#include "BlastMeshEditorModule.h"
+#include "BlastMesh.h"
+#include "BlastMeshFactory.h"
+#include "BlastMeshUtilities.h"
 
-#include "blast-sdk/extensions/authoringCommon/NvBlastExtAuthoringTypes.h"
-#include "blast-sdk/extensions/authoringCommon/NvBlastExtAuthoringConvexMeshBuilder.h"
-#include "blast-sdk/extensions/authoringCommon/NvBlastExtAuthoringMesh.h"
-#include "blast-sdk/extensions/authoring/NvBlastExtAuthoring.h"
-#include "blast-sdk/extensions/authoring/NvBlastExtAuthoringBondGenerator.h"
-#include "blast-sdk/extensions/authoring/NvBlastExtAuthoringFractureTool.h"
-#include "blast-sdk/extensions/authoring/NvBlastExtAuthoringMeshCleaner.h"
+#include "NvBlastExtAuthoring.h"
+#include "NvBlastExtAuthoringTypes.h"
+#include "NvBlastExtAuthoringBondGenerator.h"
+#include "NvBlastExtAuthoringConvexMeshBuilder.h"
+#include "NvBlastExtAuthoringMesh.h"
+#include "NvBlastExtAuthoringFractureTool.h"
 #include "NvBlast.h"
-#include "blast-sdk/globals/NvBlastGlobals.h"
+#include "NvBlastGlobals.h"
 
 #include "Misc/ScopedSlowTask.h"
 #include "Factories/FbxSkeletalMeshImportData.h"
@@ -19,21 +23,20 @@
 
 #include "ComponentReregisterContext.h"
 #include "Engine/StaticMesh.h"
-#include "Engine/SkinnedAssetCommon.h"
 #include "Components/SkinnedMeshComponent.h"
+#include "../Private/MeshMergeHelpers.h"
 #include "RawMesh.h"
 #include "Engine/Texture2D.h"
 #include "MeshDescriptionOperations.h"
-#include "Chaos/Convex.h"
 
-#include "BlastFractureSettings.h"
-#include "BlastMeshEditorModule.h"
-#include "BlastMesh.h"
-#include "BlastMeshFactory.h"
-#include "BlastMeshUtilities.h"
-#include "BlastGlobals.h"
-#include "BlastMeshImporter.h"
-#include "BlastMeshImporterFbxReader.h"
+
+#undef WITH_APEX
+#define WITH_APEX 0
+#include "PhysXPublic.h"
+#include "IPhysXCookingModule.h"
+#include "IPhysXCooking.h"
+
+#include <vector>
 
 #define LOCTEXT_NAMESPACE "BlastMeshEditor"
 
@@ -46,7 +49,6 @@ class FBlastScopedProfiler
 	double Duration = 0;
 	bool IsStarted = false;
 	FString Name;
-
 public:
 	FBlastScopedProfiler(const FString& InName, bool ShouldStart = true)
 	{
@@ -60,8 +62,7 @@ public:
 	~FBlastScopedProfiler()
 	{
 		Stop();
-		UE_LOG(LogBlastMeshEditor, Verbose, TEXT("Blast Profiler: %s - Execution time, s: %f"), *Name,
-		       Duration / (double)CLOCKS_PER_SEC);
+		UE_LOG(LogBlastMeshEditor, Verbose, TEXT("Blast Profiler: %s - Execution time, s: %f"), *Name, Duration / (double)CLOCKS_PER_SEC);
 	}
 
 	void Start()
@@ -103,10 +104,7 @@ public:
 
 struct FCollisionHull : public Nv::Blast::CollisionHull
 {
-	FCollisionHull()
-	{
-	};
-
+	FCollisionHull() {};
 	FCollisionHull(const CollisionHull& hullToCopy)
 	{
 		pointsCount = hullToCopy.pointsCount;
@@ -114,13 +112,12 @@ struct FCollisionHull : public Nv::Blast::CollisionHull
 		polygonDataCount = hullToCopy.polygonDataCount;
 
 		points = SAFE_ARRAY_NEW(NvcVec3, pointsCount);
-		indices = SAFE_ARRAY_NEW(uint32, indicesCount);
+		indices = SAFE_ARRAY_NEW(uint32_t, indicesCount);
 		polygonData = SAFE_ARRAY_NEW(Nv::Blast::HullPolygon, polygonDataCount);
-		FMemory::Memcpy(points, hullToCopy.points, sizeof(NvcVec3) * pointsCount);
-		FMemory::Memcpy(indices, hullToCopy.indices, sizeof(uint32) * indicesCount);
-		FMemory::Memcpy(polygonData, hullToCopy.polygonData, sizeof(Nv::Blast::HullPolygon) * polygonDataCount);
+		memcpy(points, hullToCopy.points, sizeof(points[0]) * pointsCount);
+		memcpy(indices, hullToCopy.indices, sizeof(indices[0]) * indicesCount);
+		memcpy(polygonData, hullToCopy.polygonData, sizeof(polygonData[0]) * polygonDataCount);
 	}
-
 	~FCollisionHull()
 	{
 		SAFE_ARRAY_DELETE(points);
@@ -133,57 +130,98 @@ struct FCollisionHull : public Nv::Blast::CollisionHull
 class FCollisionBuilder : public Nv::Blast::ConvexMeshBuilder
 {
 public:
-	FCollisionBuilder()
+	FCollisionBuilder() : mCooking(GetPhysXCookingModule()->GetPhysXCooking()->GetCooking()), mInsertionCallback(&GPhysXSDK->getPhysicsInsertionCallback()) {}
+	virtual ~FCollisionBuilder() {}
+
+	Nv::Blast::CollisionHull* buildCollisionGeometry(uint32_t verticesCount, const NvcVec3* vData) override
 	{
-	}
-
-	virtual ~FCollisionBuilder()
-	{
-	}
-
-	Nv::Blast::CollisionHull* buildCollisionGeometry(uint32 verticesCount, const NvcVec3* vData) override
-	{
-		// Create the corner vertices for the convex
-		TArray<Chaos::FConvex::FVec3Type> ConvexVertices;
-		ConvexVertices.AddUninitialized(verticesCount);
-		FMemory::Memcpy(ConvexVertices.GetData(), vData, sizeof(Chaos::FConvex::FVec3Type) * verticesCount);
-
-		// Margin is always zero on convex shapes - they are intended to be instanced
-		const Chaos::FConvex GeneratedHull(ConvexVertices, 0.0f);
-
 		Nv::Blast::CollisionHull* output = new FCollisionHull();
+		std::vector<PxVec3> vertexData(verticesCount);
+		memcpy(vertexData.data(), vData, sizeof(physx::PxVec3) * verticesCount);
 
-		output->pointsCount = GeneratedHull.NumVertices();
-		output->points = SAFE_ARRAY_NEW(NvcVec3, output->pointsCount);
-		FMemory::Memcpy(output->points, GeneratedHull.GetVertices().GetData(),
-		                sizeof(Chaos::FConvex::FVec3Type) * output->pointsCount);
-
-		output->polygonDataCount = GeneratedHull.NumPlanes();
-		output->polygonData = SAFE_ARRAY_NEW(Nv::Blast::HullPolygon, output->polygonDataCount);
-
-		TArray<int32> Indices;
-		Indices.Reserve(3 * output->polygonDataCount); // at minimum, we will have this many indices
-		for (uint32 PlaneIdx = 0; PlaneIdx < output->polygonDataCount; ++PlaneIdx)
+		PxConvexMeshDesc convexMeshDescr;
+		PxBounds3 bounds;
+		// Scale chunk to unit cube size, to avoid numerical errors
+		bounds.setEmpty();
+		for (uint32_t i = 0; i < vertexData.size(); ++i)
 		{
-			Nv::Blast::HullPolygon& HullPoly = output->polygonData[PlaneIdx];
-
-			HullPoly.vertexCount = GeneratedHull.NumPlaneVertices(PlaneIdx);
-			HullPoly.indexBase = Indices.Num();
-			Indices.AddUninitialized(HullPoly.vertexCount);
-
-			const Chaos::FConvex::FPlaneType& ChaosPlane = GeneratedHull.GetFaces()[PlaneIdx];
-			for (int32 VertIdx = 0; VertIdx < HullPoly.vertexCount; VertIdx++)
-			{
-				Indices[HullPoly.indexBase + VertIdx] = GeneratedHull.GetPlaneVertex(PlaneIdx, VertIdx);
-			}
-			ToNvPlane4(FPlane4f(ChaosPlane.X(), ChaosPlane.Normal()), HullPoly.plane);
+			bounds.include(vertexData[i]);
 		}
+		PxVec3 bbCenter = bounds.getCenter();
+		float scale = PxMax(PxAbs(bounds.getExtents(0)), PxMax(PxAbs(bounds.getExtents(1)), PxAbs(bounds.getExtents(2))));
+		for (uint32_t i = 0; i < vertexData.size(); ++i)
+		{
+			vertexData[i] = vertexData[i] - bbCenter;
+			vertexData[i] *= (1.0f / scale);
+		}
+		bounds.setEmpty();
+		for (uint32_t i = 0; i < vertexData.size(); ++i)
+		{
+			bounds.include(vertexData[i]);
+		}
+		convexMeshDescr.points.data = vertexData.data();
+		convexMeshDescr.points.stride = sizeof(PxVec3);
+		convexMeshDescr.points.count = (uint32_t)vertexData.size();
+		convexMeshDescr.flags = PxConvexFlag::eCOMPUTE_CONVEX;
+		PxConvexMesh* resultConvexMesh = mCooking->createConvexMesh(convexMeshDescr, *mInsertionCallback);
+		if (!resultConvexMesh)
+		{
+			vertexData.clear();
+			vertexData.push_back(bounds.minimum);
+			vertexData.push_back(PxVec3(bounds.minimum.x, bounds.maximum.y, bounds.minimum.z));
+			vertexData.push_back(PxVec3(bounds.maximum.x, bounds.maximum.y, bounds.minimum.z));
+			vertexData.push_back(PxVec3(bounds.maximum.x, bounds.minimum.y, bounds.minimum.z));
+			vertexData.push_back(PxVec3(bounds.minimum.x, bounds.minimum.y, bounds.maximum.z));
+			vertexData.push_back(PxVec3(bounds.minimum.x, bounds.maximum.y, bounds.maximum.z));
+			vertexData.push_back(PxVec3(bounds.maximum.x, bounds.maximum.y, bounds.maximum.z));
+			vertexData.push_back(PxVec3(bounds.maximum.x, bounds.minimum.y, bounds.maximum.z));
+			convexMeshDescr.points.data = vertexData.data();
+			convexMeshDescr.points.count = (uint32_t)vertexData.size();
+			resultConvexMesh = mCooking->createConvexMesh(convexMeshDescr, *mInsertionCallback);
+		}
+		output->polygonDataCount = resultConvexMesh->getNbPolygons();
+		if (output->polygonDataCount)
+			output->polygonData = SAFE_ARRAY_NEW(Nv::Blast::HullPolygon, output->polygonDataCount);
+		output->pointsCount = resultConvexMesh->getNbVertices();
+		output->points = SAFE_ARRAY_NEW(NvcVec3, output->pointsCount);
+		int32_t indicesCount = 0;
+		PxHullPolygon hPoly;
+		for (uint32_t i = 0; i < resultConvexMesh->getNbPolygons(); ++i)
+		{
+			Nv::Blast::HullPolygon& pd = output->polygonData[i];
+			resultConvexMesh->getPolygonData(i, hPoly);
+			pd.indexBase = hPoly.mIndexBase;
+			pd.vertexCount = hPoly.mNbVerts;
+			pd.plane[0] = hPoly.mPlane[0];
+			pd.plane[1] = hPoly.mPlane[1];
+			pd.plane[2] = hPoly.mPlane[2];
+			pd.plane[3] = hPoly.mPlane[3];
 
-		output->indicesCount = Indices.Num();
-		output->indices = SAFE_ARRAY_NEW(uint32, output->indicesCount);
-		FMemory::Memcpy(output->indices, Indices.GetData(), sizeof(uint32) * output->indicesCount);
-
+			pd.plane[0] /= scale;
+			pd.plane[1] /= scale;
+			pd.plane[2] /= scale;
+			pd.plane[3] -= (pd.plane[0] * bbCenter.x + pd.plane[1] * bbCenter.y + pd.plane[2] * bbCenter.z);
+			float length = sqrt(pd.plane[0] * pd.plane[0] + pd.plane[1] * pd.plane[1] + pd.plane[2] * pd.plane[2]);
+			pd.plane[0] /= length;
+			pd.plane[1] /= length;
+			pd.plane[2] /= length;
+			pd.plane[3] /= length;
+			indicesCount = PxMax(indicesCount, pd.indexBase + pd.vertexCount);
+		}
+		output->indicesCount = indicesCount;
+		output->indices = SAFE_ARRAY_NEW(uint32_t, indicesCount);
+		for (uint32_t i = 0; i < resultConvexMesh->getNbVertices(); ++i)
+		{
+			PxVec3 p = resultConvexMesh->getVertices()[i] * scale + bbCenter;
+			output->points[i] = { p.x, p.y, p.z };
+		}
+		for (int32_t i = 0; i < indicesCount; ++i)
+		{
+			output->indices[i] = resultConvexMesh->getIndexBuffer()[i];
+		}
+		resultConvexMesh->release();
 		return output;
+
 	}
 
 	void releaseCollisionHull(Nv::Blast::CollisionHull* hull) const override
@@ -200,6 +238,10 @@ public:
 	void release() override
 	{
 	}
+
+private:
+	physx::PxCooking* mCooking;
+	physx::PxPhysicsInsertionCallback* mInsertionCallback;
 };
 
 
@@ -214,14 +256,14 @@ inline int32 GetFractureChunkId(TSharedPtr<FFractureSession> session, uint32 Chu
 	return ChunkIndex;
 }
 
-inline int32 GetChunkToolIndexFromSessionIndex(TSharedPtr<FFractureSession> session, int32 ChunkAssetIndex)
+inline int32_t GetChunkToolIndexFromSessionIndex(TSharedPtr<FFractureSession> session, int32_t ChunkAssetIndex)
 {
-	const int32 ChunkId = GetFractureChunkId(session, ChunkAssetIndex);
+	const int32_t ChunkId = GetFractureChunkId(session, ChunkAssetIndex);
 	if (ChunkId < 0)
 	{
 		return -1;
 	}
-	return session->FractureTool->getChunkInfoIndex(ChunkId);
+	return session->FractureTool->getChunkIndex(ChunkId);
 }
 
 
@@ -232,14 +274,12 @@ inline int32 GetChunkToolIndexFromSessionIndex(TSharedPtr<FFractureSession> sess
 class FFractureRandomGenerator : public Nv::Blast::RandomGeneratorBase
 {
 	FRandomStream RStream;
-
 public:
 	float getRandomValue()
 	{
 		return RStream.GetFraction();
 	}
-
-	void seed(int32 seed)
+	void seed(int32_t seed)
 	{
 		if (seed < 0)
 		{
@@ -270,87 +310,72 @@ UBlastFractureSettings* FBlastFracture::CreateFractureSettings(class FBlastMeshE
 	return Settings;
 }
 
-TSharedPtr<FFractureSession> FBlastFracture::StartFractureSessionInternal(UBlastMesh* InBlastMesh)
+void ReorderFractureToolData(FBlastFractureToolData& Dst, const FBlastFractureToolData& Src, const int32* Map, int32 ChunkCount)
+{
+	Dst.VerticesOffset[0] = 0;
+	Dst.EdgesOffset[0] = 0;
+	Dst.FacesOffset[0] = 0;
+	for (int32 ChunkIndex = 0; ChunkIndex < ChunkCount; ++ChunkIndex)
+	{
+		// Get mapped old chunk chunk index for the new ChunkIndex (in asset order)
+		const int32 OldChunkIndex = Map[ChunkIndex];
+
+		// Find the old buffer ranges
+		const uint32_t vb = Src.VerticesOffset[OldChunkIndex], ve = Src.VerticesOffset[OldChunkIndex + 1];
+		const uint32_t eb = Src.EdgesOffset[OldChunkIndex], ee = Src.EdgesOffset[OldChunkIndex + 1];
+		const uint32_t fb = Src.FacesOffset[OldChunkIndex], fe = Src.FacesOffset[OldChunkIndex + 1];
+
+		// Create new offsets
+		Dst.VerticesOffset[ChunkIndex + 1] = Dst.VerticesOffset[ChunkIndex] + ve - vb;
+		Dst.EdgesOffset[ChunkIndex + 1] = Dst.EdgesOffset[ChunkIndex] + ee - eb;
+		Dst.FacesOffset[ChunkIndex + 1] = Dst.FacesOffset[ChunkIndex] + fe - fb;
+
+		// Copy data for this chunk
+		FMemory::Memcpy(reinterpret_cast<Nv::Blast::Vertex*>(Dst.Vertices.GetData()) + Dst.VerticesOffset[ChunkIndex], reinterpret_cast<const Nv::Blast::Vertex*>(Src.Vertices.GetData()) + vb, (ve - vb) * sizeof(Nv::Blast::Vertex));
+		FMemory::Memcpy(reinterpret_cast<Nv::Blast::Edge*>(Dst.Edges.GetData()) + Dst.EdgesOffset[ChunkIndex], reinterpret_cast<const Nv::Blast::Edge*>(Src.Edges.GetData()) + eb, (ee - eb) * sizeof(Nv::Blast::Edge));
+		FMemory::Memcpy(reinterpret_cast<Nv::Blast::Facet*>(Dst.Faces.GetData()) + Dst.FacesOffset[ChunkIndex], reinterpret_cast<const Nv::Blast::Facet*>(Src.Faces.GetData()) + fb, (fe - fb) * sizeof(Nv::Blast::Facet));
+	}
+}
+
+TSharedPtr<FFractureSession> FBlastFracture::StartFractureSession(UBlastMesh* InBlastMesh, UStaticMesh* InSourceStaticMesh, UBlastFractureSettings* Settings, bool ForceLoadFracturedMesh)
 {
 	FScopeLock Lock(&ExclusiveFractureSection);
 
 	TSharedPtr<FFractureSession> FractureSession = MakeShareable(new FFractureSession());
-	FractureSession->FractureTool = TSharedPtr<Nv::Blast::FractureTool>(NvBlastExtAuthoringCreateFractureTool(),
-																		[](Nv::Blast::FractureTool* p)
-																		{
-																			p->release();
-																		});
+	FractureSession->FractureTool = TSharedPtr<Nv::Blast::FractureTool>(NvBlastExtAuthoringCreateFractureTool(), [](Nv::Blast::FractureTool* p)
+	{
+		p->release();
+	});
 	FractureSession->BlastMesh = InBlastMesh;
 	if (!FractureSession->FractureTool.IsValid() || InBlastMesh == nullptr)
-	{
-		return nullptr;
-	}
-
-	return FractureSession;
-}
-
-TSharedPtr<FFractureSession> FBlastFracture::StartFractureSession(UBlastMesh* InBlastMesh,
-                                                                  UStaticMesh* InSourceStaticMesh, bool bCleanMesh,
-                                                                  UBlastFractureSettings* Settings,
-                                                                  bool ForceLoadFracturedMesh)
-{
-	FScopeLock Lock(&ExclusiveFractureSection);
-
-	TSharedPtr<FFractureSession> FractureSession = StartFractureSessionInternal(InBlastMesh);
-	if (!FractureSession)
 	{
 		UE_LOG(LogBlastMeshEditor, Error, TEXT("Failed to start fracture session"));
 		return nullptr;
 	}
 
-	FTransform3f UE4ToBlastTransform;
+	FTransform UE4ToBlastTransform;
 
 	if (InSourceStaticMesh != nullptr)
 	{
-		UE4ToBlastTransform = UBlastMesh::GetTransformUEToBlastCoordinateSystem();
+		UE4ToBlastTransform = UBlastMeshFactory::GetTransformUE4ToBlastCoordinateSystem(nullptr);
 
 		// Fill required material map
 		TMap<FName, int32> MaterialMap;
 		for (int32 MaterialIndex = 0; MaterialIndex < InSourceStaticMesh->GetStaticMaterials().Num(); ++MaterialIndex)
 		{
-			MaterialMap.Add(InSourceStaticMesh->GetStaticMaterials()[MaterialIndex].ImportedMaterialSlotName,
-			                MaterialIndex);
+			MaterialMap.Add(InSourceStaticMesh->GetStaticMaterials()[MaterialIndex].ImportedMaterialSlotName, MaterialIndex);
 		}
 
-		Nv::Blast::Mesh* Mesh = nullptr;
-		/* Experimental
-		if (FStaticMeshRenderData* RenderData = InSourceStaticMesh->GetRenderData())
-		{
-			Mesh = CreateAuthoringMeshFromRenderData(*RenderData, MaterialMap,
-			                                         UE4ToBlastTransform);
-		}
-		*/
+		FRawMesh InSourceRawMesh;
+		FStaticMeshOperations::ConvertToRawMesh(*InSourceStaticMesh->GetMeshDescription(0), InSourceRawMesh, MaterialMap);
 
-		if (!Mesh)
-		{
-			FRawMesh InSourceRawMesh;
-			FStaticMeshOperations::ConvertToRawMesh(*InSourceStaticMesh->GetMeshDescription(0), InSourceRawMesh,
-			                                        MaterialMap);
+		BuildSmoothingGroups(InSourceRawMesh); //Retrieve mesh just assign default smoothing group 1 for each face. So we need to generate it.
 
-			Mesh = CreateAuthoringMeshFromRawMesh(InSourceRawMesh, UE4ToBlastTransform);
-		}
-
-		if (Mesh && bCleanMesh)
-		{
-			Nv::Blast::MeshCleaner* NvMeshCleaner = NvBlastExtAuthoringCreateMeshCleaner();
-			Nv::Blast::Mesh* CleanedMesh = NvMeshCleaner->cleanMesh(Mesh);
-			NvMeshCleaner->release();
-			if (CleanedMesh)
-			{
-				Mesh->release();
-				Mesh = CleanedMesh;
-			}
-		}
-
-		FractureSession->FractureTool->setChunkMesh(Mesh, -1);
+		Nv::Blast::Mesh* Mesh = CreateAuthoringMeshFromRawMesh(InSourceRawMesh, UE4ToBlastTransform);
+		FractureSession->FractureTool->setSourceMesh(Mesh);
 
 		LoadFracturedMesh(FractureSession, -1, InSourceStaticMesh);
-
+		
 		//need this to force saving fracture tool state
 		FractureSession->IsRootFractured = true;
 		FractureSession->IsMeshCreatedFromFractureData = true;
@@ -359,67 +384,82 @@ TSharedPtr<FFractureSession> FBlastFracture::StartFractureSession(UBlastMesh* In
 	{
 		FBlastScopedProfiler LFTSP("Load fracture tool state");
 		FBlastFractureToolData& FTD = InBlastMesh->FractureHistory.GetCurrentToolData();
-		const int32 SupportLevel = Settings && Settings->bDefaultSupportDepth ? Settings->DefaultSupportDepth : -1;
-		const uint32 ChunkCount = FTD.ChunkMeshes.Num();
+		const int32 SupportLevel = Settings->bDefaultSupportDepth ? Settings->DefaultSupportDepth : -1;
+		uint32 ChunkCount = FTD.VerticesOffset.Num() - 1;
+		bool ChunkFlagsMissing = false;
 
-		if (ForceLoadFracturedMesh || (ChunkCount == InBlastMesh->GetChunkCount() && ChunkCount))
+		if (InBlastMesh->ChunkIndexMap.Num() > 0)
 		{
+			ReorderFractureToolData(InBlastMesh->FractureHistory.GetCurrentToolData(), InBlastMesh->FractureToolData, InBlastMesh->ChunkIndexMap.GetData(), ChunkCount);
+			InBlastMesh->ChunkIndexMap.Empty();
+//			ForceLoadFracturedMesh = true;
+		}
+
+		if (ForceLoadFracturedMesh || (ChunkCount == InBlastMesh->GetChunkCount() && FTD.VerticesOffset.Num() != 0 && FTD.EdgesOffset.Num() == ChunkCount + 1 && FTD.FacesOffset.Num() == ChunkCount + 1))
+		{
+			ChunkFlagsMissing = FTD.VerticesOffset.Num() > 0 && FTD.ChunkFlags.Num() == 0;
+			if (ChunkFlagsMissing)
+			{
+				FTD.ChunkFlags.SetNum(FTD.VerticesOffset.Num() - 1);
+				for (int i = 0; i < FTD.ChunkFlags.Num(); ++i)
+				{
+					FTD.ChunkFlags[i] = EBlastMeshChunkFlags::ApproximateBonding;
+				}
+			}
+
 			for (uint32 ChunkIndex = 0; ChunkIndex < ChunkCount; ChunkIndex++)
 			{
-				const FBlastChunkMesh& Chunk = FTD.ChunkMeshes[ChunkIndex];
-				Nv::Blast::Mesh* ChunkMesh = NvBlastExtAuthoringCreateMeshFromFacets(Chunk.Vertices.GetData(),
-					Chunk.Edges.GetData(), Chunk.Faces.GetData(), Chunk.Vertices.Num(), Chunk.Edges.Num(),
-					Chunk.Faces.Num());
-
-				int32 chunkID = InBlastMesh->GetChunkInfo(ChunkIndex).userData;
-				int32 parentChunkId = InBlastMesh->GetChunkInfo(ChunkIndex).parentChunkIndex;
-				if (parentChunkId >= 0) // need to convert to chunk ID - not index!!
+				uint32 vb = FTD.VerticesOffset[ChunkIndex], ve = FTD.VerticesOffset[ChunkIndex + 1];
+				uint32 eb = FTD.EdgesOffset[ChunkIndex], ee = FTD.EdgesOffset[ChunkIndex + 1];
+				uint32 fb = FTD.FacesOffset[ChunkIndex], fe = FTD.FacesOffset[ChunkIndex + 1];
+				Nv::Blast::Mesh* ChunkMesh = NvBlastExtAuthoringCreateMeshFromFacets((Nv::Blast::Vertex*)FTD.Vertices.GetData() + vb,
+					(Nv::Blast::Edge*)FTD.Edges.GetData() + eb, (Nv::Blast::Facet*)FTD.Faces.GetData() + fb, ve - vb, ee - eb, fe - fb);
+				if (ChunkIndex == 0)
 				{
-					parentChunkId = InBlastMesh->GetChunkInfo(parentChunkId).userData;
+					FractureSession->FractureTool->setSourceMesh(ChunkMesh);
 				}
-
-				FractureSession->FractureTool->setChunkMesh(ChunkMesh, parentChunkId, chunkID);
-
-				FractureSession->FractureTool->setApproximateBonding(
-					ChunkIndex, EnumHasAnyFlags(Chunk.ChunkFlag, EBlastMeshChunkFlags::ApproximateBonding));
+				else
+				{
+					FractureSession->FractureTool->setChunkMesh(ChunkMesh, InBlastMesh->GetChunkInfo(ChunkIndex).parentChunkIndex);
+				}
+				FractureSession->FractureTool->setApproximateBonding(ChunkIndex, EnumHasAnyFlags(FTD.ChunkFlags[ChunkIndex], EBlastMeshChunkFlags::ApproximateBonding));
 			}
 		}
-		else
-		//If there is no saved fracture tool state, we can load chunks from SkeletalMesh.
+		else //If there is no saved fracture tool state, we can load chunks from SkeletalMesh. Note: smoothing groups will be lost.
 		{
-			UE4ToBlastTransform = UBlastMesh::GetTransformUEToBlastCoordinateSystem();
-			
+			UE4ToBlastTransform = UBlastMeshFactory::GetTransformUE4ToBlastCoordinateSystem(Cast<UFbxSkeletalMeshImportData>(InBlastMesh->Mesh->GetAssetImportData()));
 			TArray<FRawMesh> RawMeshes;
+			RawMeshes.SetNum(InBlastMesh->GetChunkCount());
 			{
 				FBlastScopedProfiler SCMP("GetRenderMesh");
-				RawMeshes = InBlastMesh->GetRenderMeshes(0);
+				InBlastMesh->GetRenderMesh(0, RawMeshes);
 			}
-			for (int32 ChunkIdx = 0; ChunkIdx < RawMeshes.Num(); ChunkIdx++)
+			for (int32 ChunkId = 0; ChunkId < RawMeshes.Num(); ChunkId++)
 			{
-				Nv::Blast::Mesh* ChunkMesh = CreateAuthoringMeshFromRawMesh(RawMeshes[ChunkIdx], UE4ToBlastTransform);
-
-				int32 parentChunkId = InBlastMesh->GetChunkInfo(ChunkIdx).parentChunkIndex;
-				if (parentChunkId >= 0) // need to convert to chunk ID - not index!!
+				Nv::Blast::Mesh* ChunkMesh = CreateAuthoringMeshFromRawMesh(RawMeshes[ChunkId], UE4ToBlastTransform);
+				if (ChunkId == 0)
 				{
-					parentChunkId = InBlastMesh->GetChunkInfo(parentChunkId).userData;
+					FractureSession->FractureTool->setSourceMesh(ChunkMesh);
 				}
-				FractureSession->FractureTool->setChunkMesh(ChunkMesh, parentChunkId,
-				                                            (int32)InBlastMesh->GetChunkInfo(ChunkIdx).userData);
+				else
+				{
+					FractureSession->FractureTool->setChunkMesh(ChunkMesh, InBlastMesh->GetChunkInfo(ChunkId).parentChunkIndex);
+				}			
 			}
 		}
 		if (ForceLoadFracturedMesh)
 		{
 			LoadFracturedMesh(FractureSession, SupportLevel, nullptr);
 		}
-		else if (!FractureSession->IsRootFractured)
+		else
+		if (!FractureSession->IsRootFractured)
 		{
 			LoadFractureData(FractureSession, SupportLevel, nullptr);
-			if (FTD.ChunkMeshes.IsEmpty())
-			// This is a way of dealing with old assets that have no fracture tool data serialized
+			if (FTD.VerticesOffset.Num() == 0)	// This is a way of dealing with old assets that have no fracture tool data serialized
 			{
-				InBlastMesh->FractureHistory.Collapse(); // Reduce history to one entry
-				const uint32 ToolChunkCount = FractureSession->FractureTool->getChunkCount();
-				for (uint32 ChunkIndex = 0; ChunkIndex < ToolChunkCount; ++ChunkIndex)
+				InBlastMesh->FractureHistory.Collapse();	// Reduce history to one entry
+				const uint32_t ToolChunkCount = FractureSession->FractureTool->getChunkCount();
+				for (uint32_t ChunkIndex = 0; ChunkIndex < ToolChunkCount; ++ChunkIndex)
 				{
 					FractureSession->FractureTool->setApproximateBonding(ChunkIndex, true);
 				}
@@ -451,7 +491,7 @@ void FBlastFracture::FinishFractureSession(FFractureSessionPtr FractureSession)
 				FS->BlastMesh->Mesh->ReleaseResources();
 				FS->BlastMesh->Mesh->ReleaseResourcesFence.Wait();
 			}
-			CreateSkeletalMeshFromAuthoring(FS, nullptr);
+			CreateSkeletalMeshFromAuthoring(FS, true, nullptr);
 
 			FS->BlastMesh->RebuildIndexToBoneNameMap();
 			FS->BlastMesh->RebuildCookedBodySetupsIfRequired(true);
@@ -465,29 +505,25 @@ void FBlastFracture::FinishFractureSession(FFractureSessionPtr FractureSession)
 	}
 }
 
-void FBlastFracture::GetVoronoiSites(TSharedPtr<FFractureSession> FractureSession, int32 ChunkAssetIdx,
-                                     TArray<FVector3f>& Sites)
+void FBlastFracture::GetVoronoiSites(TSharedPtr<FFractureSession> FractureSession, int32 ChunkId, TArray<FVector>& Sites)
 {
-	Sites.Empty();
 	if (!FractureSession.IsValid() || !FractureSession->IsRootFractured)
 	{
 		return;
 	}
-
-	const auto Generator = FractureSession->SitesGeneratorMap.Find(GetFractureChunkId(FractureSession, ChunkAssetIdx));
-	if (!Generator || !Generator->Generator.IsValid())
+	auto Generator = FractureSession->SitesGeneratorMap.Find(GetFractureChunkId(FractureSession, ChunkId));
+	if (Generator == nullptr || !Generator->Generator.IsValid())
 	{
 		return;
 	}
 	const NvcVec3* sites = nullptr;
 	int32 sitesCount = Generator->Generator->getVoronoiSites(sites);
-	Sites.SetNumUninitialized(sitesCount);
-	FMemory::Memcpy(Sites.GetData(), sites, sizeof(FVector3f) * sitesCount);
-
-	FTransform3f Converter = UBlastMesh::GetTransformBlastToUECoordinateSystem();
-	for (FVector3f& p : Sites)
+	Sites.Reset(sitesCount);
+	auto SkelMeshImportData = Cast<UFbxSkeletalMeshImportData>(FractureSession->BlastMesh->Mesh->GetAssetImportData());
+	auto Converter = UBlastMeshFactory::GetTransformBlastToUE4CoordinateSystem(SkelMeshImportData);
+	for (int32 i = 0; i < sitesCount; i++)
 	{
-		p = Converter.TransformPosition(p);
+		Sites.Add(Converter.TransformPosition(FVector(sites[i].x, sites[i].y, sites[i].z)));
 	}
 }
 
@@ -512,7 +548,7 @@ void FBlastFracture::Undo(UBlastFractureSettings* Settings)
 
 	FinishFractureSession(Settings->FractureSession);
 	BlastMesh->FractureHistory.Undo();
-	Settings->FractureSession = StartFractureSession(BlastMesh, nullptr, false, Settings, true);
+	Settings->FractureSession = StartFractureSession(BlastMesh, nullptr, Settings, true);
 }
 
 bool FBlastFracture::CanRedo(UBlastFractureSettings* Settings) const
@@ -535,130 +571,10 @@ void FBlastFracture::Redo(UBlastFractureSettings* Settings)
 
 	FinishFractureSession(Settings->FractureSession);
 	BlastMesh->FractureHistory.Redo();
-	Settings->FractureSession = StartFractureSession(BlastMesh, nullptr, false, Settings, true);
+	Settings->FractureSession = StartFractureSession(BlastMesh, nullptr, Settings, true);
 }
 
-Nv::Blast::Mesh* CreateMeshFromImportedData(const FMeshData& MeshData, bool bClean)
-{
-	Nv::Blast::Mesh* mesh = NvBlastExtAuthoringCreateMesh(MeshData.Verts.GetData(), MeshData.Normals.GetData(), MeshData.UVs.GetData(), MeshData.Verts.Num(), MeshData.Indices.GetData(), MeshData.Indices.Num());
-
-	if (mesh)
-	{
-		const int32 NumFaces = MeshData.Indices.Num() / 3;
-		if (MeshData.MaterialIDs.Num() == NumFaces)
-		{
-			mesh->setMaterialId(MeshData.MaterialIDs.GetData());
-		}
-		
-		if (MeshData.SmoothingGroups.Num() == NumFaces)
-		{
-			mesh->setSmoothingGroup(MeshData.SmoothingGroups.GetData());
-		}
-		
-		if (bClean)
-		{
-			Nv::Blast::MeshCleaner* cleaner = NvBlastExtAuthoringCreateMeshCleaner();
-			Nv::Blast::Mesh* nmesh = cleaner->cleanMesh(mesh);
-			cleaner->release();
-			if (nmesh)
-			{
-				mesh->release();
-				mesh = nmesh;
-			}
-		}
-	}
-
-	return mesh;
-}
-
-void AddMeshToGraph(Nv::Blast::FractureTool* FractureTool, const FImportedMeshData& Imported, bool bClean, int32 Idx, int32 ParentChunkId = -1)
-{
-	if (Imported.Chunks[Idx].Indices.IsEmpty())
-	{
-		return;
-	}
-	
-	Nv::Blast::Mesh* Mesh = CreateMeshFromImportedData(Imported.Chunks[Idx], bClean);
-	if (!Mesh)
-	{
-		UE_LOG(LogBlastMeshEditor, Error, TEXT("Failed to generate blast mesh for chunk %d from imported data."), Idx);
-		return;
-	}
-	
-	int32 AddedChunkId = FractureTool->setChunkMesh(Mesh, ParentChunkId);
-	if (ParentChunkId != -1)
-	{
-		FractureTool->setApproximateBonding(FractureTool->getChunkInfoIndex(AddedChunkId), true);
-	}
-	
-	const TArray<int32> Children = Imported.GetListOfChildren(Idx);
-	for (int32 ChildIdx : Children)
-	{
-		AddMeshToGraph(FractureTool, Imported, bClean, ChildIdx, AddedChunkId);
-	}
-}
-
-bool FBlastFracture::ImportRootChunk(UBlastMesh* InBlastMesh, UBlastFractureSettings* Settings, const FString& InFilePath, bool bCleanMesh)
-{
-	TSharedPtr<IBlastMeshFileReader> fileReader;
-	if (FPaths::GetExtension(InFilePath).Equals(TEXT("FBX"), ESearchCase::IgnoreCase))
-	{
-		fileReader = MakeShared<Nv::Blast::FbxFileReader>();
-	}
-	else
-	{
-		UE_LOG(LogBlastMeshEditor, Error, TEXT("Import done with unknown file extension %s"), *FPaths::GetExtension(InFilePath));
-		return false;
-	}
-
-	FScopedSlowTask SlowTask(2 + (bCleanMesh ? 5 : 0), LOCTEXT("CreateBlastMeshesFromFBX", "Importing FBX mesh..."));
-	SlowTask.EnterProgressFrame(1.f);
-
-	// Load the asset
-	const FImportedMeshData MeshData = fileReader->LoadFromFile(InFilePath);
-	
-	if (MeshData.Chunks.IsEmpty())
-	{
-		UE_LOG(LogBlastMeshEditor, Error, TEXT("Could not import mesh from %s. No chunks found."), *InFilePath);
-		return false;
-	}
-	
-	SlowTask.EnterProgressFrame(1.f, LOCTEXT("CreateBlastMeshesFromFBX", "Creating chunks..."));
-
-	if (Settings->FractureSession.IsValid())
-	{
-		FinishFractureSession(Settings->FractureSession);
-		Settings->Reset();
-	}
-
-	Settings->FractureSession = StartFractureSessionInternal(InBlastMesh);
-	if (!Settings->FractureSession)
-	{
-		UE_LOG(LogBlastMeshEditor, Error, TEXT("Failed to start fracture session"));
-		return false;
-	}
-
-	// this bad boi is recursive
-	AddMeshToGraph(Settings->FractureSession->FractureTool.Get(), MeshData, bCleanMesh, 0);
-
-	Settings->FractureSession->IsMeshModified = true;
-	LoadFracturedMesh(Settings->FractureSession, -1);
-
-	//need this to force saving fracture tool state
-	Settings->FractureSession->IsRootFractured = true;
-	Settings->FractureSession->IsMeshCreatedFromFractureData = true;
-	
-	if (Settings)
-	{
-		PopulateSettingsFromBlastMesh(Settings, Settings->FractureSession->BlastMesh);
-	}
-
-	FinishFractureSession(Settings->FractureSession);
-	return true;
-}
-
-void FBlastFracture::Fracture(UBlastFractureSettings* Settings, TSet<int32>& SelectedChunkIndices,
-                              int32 ClickedChunkIndex)
+void FBlastFracture::Fracture(UBlastFractureSettings* Settings, TSet<int32>& SelectedChunkIndices, int32 ClickedChunkIndex)
 {
 	FBlastScopedProfiler FP("Fracture");
 	FScopeLock Lock(&ExclusiveFractureSection);
@@ -668,7 +584,7 @@ void FBlastFracture::Fracture(UBlastFractureSettings* Settings, TSet<int32>& Sel
 		return;
 	}
 	auto FractureSession = Settings->FractureSession;
-
+	
 	auto InteriorMaterial = Settings->InteriorMaterial;
 	if (Settings->InteriorMaterialSlotName == NAME_None)
 	{
@@ -676,13 +592,12 @@ void FBlastFracture::Fracture(UBlastFractureSettings* Settings, TSet<int32>& Sel
 	}
 	else
 	{
-		int32 InteriorMatID = Nv::Blast::kMaterialInteriorId;
+		int32_t InteriorMatID = Nv::Blast::kMaterialInteriorId;
 		const auto& MatList = FractureSession->BlastMesh->Mesh->GetMaterials();
 		for (int32 I = 0; I < MatList.Num(); I++)
 		{
 			const FSkeletalMaterial& Mat = MatList[I];
-			if ((Mat.ImportedMaterialSlotName.IsNone() ? Mat.MaterialSlotName : Mat.ImportedMaterialSlotName) ==
-				Settings->InteriorMaterialSlotName)
+			if ((Mat.ImportedMaterialSlotName.IsNone() ? Mat.MaterialSlotName : Mat.ImportedMaterialSlotName) == Settings->InteriorMaterialSlotName)
 			{
 				InteriorMatID = I;
 				InteriorMaterial = MatList[I].MaterialInterface;
@@ -697,7 +612,7 @@ void FBlastFracture::Fracture(UBlastFractureSettings* Settings, TSet<int32>& Sel
 
 	if (ClickedChunkIndex != INDEX_NONE)
 	{
-		if (SelectedChunkIndices.Num() == 0)
+		if (SelectedChunkIndices.Num() == 0 )
 		{
 			SelectedChunkIndices.Reset();
 			SelectedChunkIndices.Add(ClickedChunkIndex);
@@ -723,7 +638,7 @@ void FBlastFracture::Fracture(UBlastFractureSettings* Settings, TSet<int32>& Sel
 	FractureSession->FractureTool->setRemoveIslands(Settings->bRemoveIslands);
 	bool IsCancel = false;
 
-	FTransform3f UE4ToBlastTransform = UBlastMesh::GetTransformUEToBlastCoordinateSystem();
+	auto UE4ToBlastTransform = UBlastMeshFactory::GetTransformUE4ToBlastCoordinateSystem(Cast<UFbxSkeletalMeshImportData>(FractureSession->BlastMesh->Mesh->GetAssetImportData()));
 
 	for (int32 ChunkIndex : SelectedChunkIndices)
 	{
@@ -731,7 +646,7 @@ void FBlastFracture::Fracture(UBlastFractureSettings* Settings, TSet<int32>& Sel
 		{
 			break;
 		}
-		int32 FractureChunkId = GetFractureChunkId(FractureSession, ChunkIndex);
+		int32_t FractureChunkId = GetFractureChunkId(FractureSession, ChunkIndex);
 		if (ChunkIndex && (ChunkIndex >= FirstInvalidChunk || FractureChunkId == INDEX_NONE))
 		{
 			continue;
@@ -742,90 +657,82 @@ void FBlastFracture::Fracture(UBlastFractureSettings* Settings, TSet<int32>& Sel
 		{
 		case EBlastFractureMethod::VoronoiUniform:
 			if (!FractureVoronoi(FractureSession, FractureChunkId, RandomSeed, IsReplace,
-			                     Settings->VoronoiUniformFracture->CellCount,
-			                     Settings->VoronoiUniformFracture->CellAnisotropy,
-			                     Settings->VoronoiUniformFracture->CellRotation,
-			                     Settings->VoronoiUniformFracture->ForceReset))
+				Settings->VoronoiUniformFracture->CellCount,
+				Settings->VoronoiUniformFracture->CellAnisotropy, Settings->VoronoiUniformFracture->CellRotation,
+				Settings->VoronoiUniformFracture->ForceReset))
 			{
 				IsCancel = true;
 			}
 			break;
 		case EBlastFractureMethod::VoronoiClustered:
 			if (!FractureClusteredVoronoi(FractureSession, FractureChunkId, RandomSeed, IsReplace,
-			                              Settings->VoronoiClusteredFracture->CellCount,
-			                              Settings->VoronoiClusteredFracture->ClusterCount,
-			                              Settings->VoronoiClusteredFracture->ClusterRadius,
-			                              Settings->VoronoiClusteredFracture->CellAnisotropy,
-			                              Settings->VoronoiClusteredFracture->CellRotation,
-			                              Settings->VoronoiClusteredFracture->ForceReset))
+				Settings->VoronoiClusteredFracture->CellCount, Settings->VoronoiClusteredFracture->ClusterCount,
+				Settings->VoronoiClusteredFracture->ClusterRadius,
+				Settings->VoronoiClusteredFracture->CellAnisotropy, Settings->VoronoiClusteredFracture->CellRotation,
+				Settings->VoronoiClusteredFracture->ForceReset))
 			{
 				IsCancel = true;
 			}
 			break;
 		case EBlastFractureMethod::VoronoiRadial:
 			if (!FractureRadial(FractureSession, FractureChunkId, RandomSeed, IsReplace,
-			                    UE4ToBlastTransform.TransformPosition(Settings->RadialFracture->Origin),
-			                    UE4ToBlastTransform.TransformVector(Settings->RadialFracture->Normal),
-			                    Settings->RadialFracture->Radius,
-			                    Settings->RadialFracture->AngularSteps, Settings->RadialFracture->RadialSteps,
-			                    Settings->RadialFracture->AngleOffset, Settings->RadialFracture->Variability,
-			                    Settings->RadialFracture->CellAnisotropy, Settings->RadialFracture->CellRotation,
-			                    Settings->RadialFracture->ForceReset))
+				UE4ToBlastTransform.TransformPosition(Settings->RadialFracture->Origin),
+				UE4ToBlastTransform.TransformVector(Settings->RadialFracture->Normal),
+				Settings->RadialFracture->Radius,
+				Settings->RadialFracture->AngularSteps, Settings->RadialFracture->RadialSteps,
+				Settings->RadialFracture->AngleOffset, Settings->RadialFracture->Variability,
+				Settings->RadialFracture->CellAnisotropy, Settings->RadialFracture->CellRotation,
+				Settings->RadialFracture->ForceReset))
 			{
 				IsCancel = true;
 			}
 			break;
 		case EBlastFractureMethod::VoronoiInSphere:
 			if (!FractureInSphere(FractureSession, FractureChunkId, RandomSeed, IsReplace,
-			                      Settings->InSphereFracture->CellCount, Settings->InSphereFracture->Radius,
-			                      UE4ToBlastTransform.TransformPosition(Settings->InSphereFracture->Origin),
-			                      Settings->InSphereFracture->CellAnisotropy, Settings->InSphereFracture->CellRotation,
-			                      Settings->InSphereFracture->ForceReset))
+				Settings->InSphereFracture->CellCount, Settings->InSphereFracture->Radius, 
+				UE4ToBlastTransform.TransformPosition(Settings->InSphereFracture->Origin),
+				Settings->InSphereFracture->CellAnisotropy, Settings->InSphereFracture->CellRotation,
+				Settings->InSphereFracture->ForceReset))
 			{
 				//IsCancel = true;
 			}
 			break;
 		case EBlastFractureMethod::VoronoiRemoveInSphere:
 			if (!RemoveInSphere(FractureSession, FractureChunkId, RandomSeed, IsReplace,
-			                    Settings->RemoveInSphere->Radius,
-			                    UE4ToBlastTransform.TransformPosition(Settings->RemoveInSphere->Origin),
-			                    Settings->RemoveInSphere->Probability, Settings->RemoveInSphere->ForceReset))
+				Settings->RemoveInSphere->Radius,
+				UE4ToBlastTransform.TransformPosition(Settings->RemoveInSphere->Origin),
+				Settings->RemoveInSphere->Probability, Settings->RemoveInSphere->ForceReset))
 			{
 				//IsCancel = true;
 			}
 			break;
 		case EBlastFractureMethod::UniformSlicing:
 			if (!FractureUniformSlicing(FractureSession, FractureChunkId, RandomSeed, IsReplace,
-			                            Settings->UniformSlicingFracture->SlicesCount,
-			                            Settings->UniformSlicingFracture->AngleVariation,
-			                            Settings->UniformSlicingFracture->OffsetVariation,
-			                            Settings->UniformSlicingFracture->Amplitude,
-			                            Settings->UniformSlicingFracture->Frequency,
-			                            Settings->UniformSlicingFracture->OctaveNumber,
-			                            Settings->UniformSlicingFracture->SamplingInterval))
+				Settings->UniformSlicingFracture->SlicesCount, Settings->UniformSlicingFracture->AngleVariation,
+				Settings->UniformSlicingFracture->OffsetVariation,
+				Settings->UniformSlicingFracture->Amplitude, Settings->UniformSlicingFracture->Frequency,
+				Settings->UniformSlicingFracture->OctaveNumber, Settings->UniformSlicingFracture->SamplingInterval))
 			{
 				IsCancel = true;
 			}
 			break;
 		case EBlastFractureMethod::Cutout:
 			if (!FractureCutout(FractureSession, FractureChunkId, RandomSeed, IsReplace,
-			                    Settings->CutoutFracture->Pattern, Settings->CutoutFracture->Origin,
-			                    Settings->CutoutFracture->Normal,
-			                    Settings->CutoutFracture->Size, Settings->CutoutFracture->RotationZ,
-			                    Settings->CutoutFracture->Aperture,
-			                    Settings->CutoutFracture->bPeriodic, Settings->CutoutFracture->bFillGaps,
-			                    Settings->CutoutFracture->Amplitude, Settings->CutoutFracture->Frequency,
-			                    Settings->CutoutFracture->OctaveNumber, Settings->CutoutFracture->SamplingInterval))
+				Settings->CutoutFracture->Pattern, Settings->CutoutFracture->Origin, Settings->CutoutFracture->Normal,
+				Settings->CutoutFracture->Size, Settings->CutoutFracture->RotationZ, Settings->CutoutFracture->Aperture,
+				Settings->CutoutFracture->bPeriodic, Settings->CutoutFracture->bFillGaps,
+				Settings->CutoutFracture->Amplitude, Settings->CutoutFracture->Frequency,
+				Settings->CutoutFracture->OctaveNumber, Settings->CutoutFracture->SamplingInterval))
 			{
 				IsCancel = true;
 			}
 			break;
 		case EBlastFractureMethod::Cut:
 			if (!FractureCut(FractureSession, FractureChunkId, RandomSeed, IsReplace,
-			                 UE4ToBlastTransform.TransformPosition(Settings->CutFracture->Point),
-			                 UE4ToBlastTransform.TransformPosition(Settings->CutFracture->Normal),
-			                 Settings->CutFracture->Amplitude, Settings->CutFracture->Frequency,
-			                 Settings->CutFracture->OctaveNumber, Settings->CutFracture->SamplingInterval))
+				UE4ToBlastTransform.TransformPosition(Settings->CutFracture->Point), 
+				UE4ToBlastTransform.TransformPosition(Settings->CutFracture->Normal),
+				Settings->CutFracture->Amplitude, Settings->CutFracture->Frequency,
+				Settings->CutFracture->OctaveNumber, Settings->CutFracture->SamplingInterval))
 			{
 				IsCancel = true;
 			}
@@ -842,8 +749,7 @@ void FBlastFracture::Fracture(UBlastFractureSettings* Settings, TSet<int32>& Sel
 	}
 	if (FracturedChunks.Num())
 	{
-		// not necessary because it's already done in ProcessFracture
-		// FractureSession->FractureTool->finalizeFracturing();
+		FractureSession->FractureTool->finalizeFracturing();
 		int32 SupportLevel = Settings->bDefaultSupportDepth ? Settings->DefaultSupportDepth : -1;
 		Settings->FractureSession->IsMeshModified = true;
 		LoadFracturedMesh(Settings->FractureSession, SupportLevel, nullptr, InteriorMaterial);
@@ -856,7 +762,7 @@ void FBlastFracture::FitUvs(UBlastFractureSettings* Settings, float Size, bool O
 	FScopeLock Lock(&ExclusiveFractureSection);
 	if (ChunkIndices.Num() > 0 && OnlySpecified)
 	{
-		for (int32 ChunkIndex : ChunkIndices)
+		for (int32 ChunkIndex : ChunkIndices) 
 		{
 			int32 ChunkId = GetFractureChunkId(Settings->FractureSession, ChunkIndex);
 			Settings->FractureSession->FractureTool->fitUvToRect(Size, ChunkId);
@@ -870,11 +776,10 @@ void FBlastFracture::FitUvs(UBlastFractureSettings* Settings, float Size, bool O
 	ReloadGraphicsMesh(Settings->FractureSession, SupportLevel, nullptr, Settings->InteriorMaterial);
 }
 
-void FBlastFracture::BuildChunkHierarchy(UBlastFractureSettings* Settings, TSet<int32>& SelectedChunkIndices,
-                                         uint32 Threshold, uint32 TargetedClusterSize, bool RemoveMergedOriginalChunks)
+void FBlastFracture::BuildChunkHierarchy(UBlastFractureSettings* Settings, TSet<int32>& SelectedChunkIndices, uint32 Threshold, uint32 TargetedClusterSize, bool RemoveMergedOriginalChunks)
 {
 	FScopeLock Lock(&ExclusiveFractureSection);
-
+	
 	if (Settings == nullptr || !Settings->FractureSession.IsValid() || !Settings->FractureSession->IsRootFractured)
 	{
 		return;
@@ -882,35 +787,32 @@ void FBlastFracture::BuildChunkHierarchy(UBlastFractureSettings* Settings, TSet<
 	int32 SupportLevel = Settings->bDefaultSupportDepth ? Settings->DefaultSupportDepth : -1;
 
 	Nv::Blast::AuthoringResult* PreviousResult = Settings->FractureSession->FractureData.Get();
-	TArray<NvcVec2i> AdjChunks;
-	AdjChunks.SetNumUninitialized(PreviousResult->bondCount);
-	for (uint32 i = 0; i < PreviousResult->bondCount; ++i)
+	std::vector<NvcVec2i> AdjChunks(PreviousResult->bondCount);
+	for (uint32_t i = 0; i < PreviousResult->bondCount; ++i)
 	{
-		const uint32* Indices = PreviousResult->bondDescs[i].chunkIndices;
+		const uint32_t* Indices = PreviousResult->bondDescs[i].chunkIndices;
 		AdjChunks[i] = {
-			GetChunkToolIndexFromSessionIndex(Settings->FractureSession, (int32)Indices[0]),
-			GetChunkToolIndexFromSessionIndex(Settings->FractureSession, (int32)Indices[1])
+			GetChunkToolIndexFromSessionIndex(Settings->FractureSession, (int32_t)Indices[0]),
+			GetChunkToolIndexFromSessionIndex(Settings->FractureSession, (int32_t)Indices[1])
 		};
 		if (AdjChunks[i].x < 0 || AdjChunks[i].y < 0)
 		{
 			return;
 		}
 	}
-	TArray<uint32> SelectionBuffer;
-	SelectionBuffer.Reserve(SelectedChunkIndices.Num());
+	std::vector<uint32_t> SelectionBuffer;
+	SelectionBuffer.reserve(SelectedChunkIndices.Num());
 	for (int32 i : SelectedChunkIndices)
 	{
-		const int32 ChunkIndex = GetChunkToolIndexFromSessionIndex(Settings->FractureSession, i);
+		const int32_t ChunkIndex = GetChunkToolIndexFromSessionIndex(Settings->FractureSession, i);
 		if (ChunkIndex < 0)
 		{
 			return;
 		}
-		SelectionBuffer.Add((uint32)ChunkIndex);
+		SelectionBuffer.push_back((uint32_t)ChunkIndex);
 	}
-	Settings->FractureSession->FractureTool->uniteChunks(Threshold, TargetedClusterSize, SelectionBuffer.GetData(),
-	                                                     (uint32)SelectionBuffer.Num(),
-	                                                     AdjChunks.GetData(), (uint32)AdjChunks.Num(),
-	                                                     RemoveMergedOriginalChunks);
+	Settings->FractureSession->FractureTool->uniteChunks(Threshold, TargetedClusterSize, SelectionBuffer.data(), (uint32_t)SelectionBuffer.size(),
+		AdjChunks.data(), (uint32_t)AdjChunks.size(), RemoveMergedOriginalChunks);
 
 	SelectedChunkIndices.Empty();
 
@@ -918,35 +820,37 @@ void FBlastFracture::BuildChunkHierarchy(UBlastFractureSettings* Settings, TSet<
 	LoadFracturedMesh(Settings->FractureSession, SupportLevel, nullptr, Settings->InteriorMaterial);
 }
 
-bool CreatePhysicsAsset(TSharedPtr<Nv::Blast::AuthoringResult> FractureData, UBlastMesh* BlastMesh)
+bool CreatePhysXAsset(TSharedPtr<Nv::Blast::AuthoringResult> FractureData, UBlastMesh* BlastMesh, UFbxSkeletalMeshImportData* SkelMeshImportData = nullptr)
 {
+	if (SkelMeshImportData == nullptr)
+	{
+		SkelMeshImportData = Cast<UFbxSkeletalMeshImportData>(BlastMesh->Mesh->GetAssetImportData());
+	}
 	FBlastScopedProfiler PACP("PhysicsAssetCreation");
 	TMap<FName, TArray<FBlastCollisionHull>> hulls;
 	hulls.Empty();
-	FTransform3f Converter = UBlastMesh::GetTransformBlastToUECoordinateSystem();
+	auto Converter = UBlastMeshFactory::GetTransformBlastToUE4CoordinateSystem(SkelMeshImportData);
 	for (uint32 ci = 0; ci < FractureData->chunkCount; ci++)
 	{
-		TArray<FBlastCollisionHull>& chunkHulls = hulls.Add(FName(*(UBlastMesh::ChunkPrefix + FString::FromInt(ci))));
-		chunkHulls.SetNum(FractureData->collisionHullOffset[ci + 1] - FractureData->collisionHullOffset[ci]);
-
+		auto& chunkHulls = hulls.Add(*(FString("chunk_") + FString::FromInt(ci)));
 		for (uint32 hi = FractureData->collisionHullOffset[ci]; hi < FractureData->collisionHullOffset[ci + 1]; hi++)
 		{
-			const Nv::Blast::CollisionHull* fh = FractureData->collisionHull[hi];
-
-			FBlastCollisionHull& outputHull = chunkHulls[hi - FractureData->collisionHullOffset[ci]];
-			outputHull.Points.SetNumUninitialized(fh->pointsCount);
-			FMemory::Memcpy(outputHull.Points.GetData(), fh->points, sizeof(FVector3f) * fh->pointsCount);
-			for (FVector3f& p : outputHull.Points)
+			FBlastCollisionHull h;
+			auto fh = FractureData->collisionHull[hi];
+			for (uint32 pi = 0; pi < fh->pointsCount; pi++)
 			{
-				p = Converter.TransformPosition(p);
+				auto p = fh->points[pi];
+				h.Points.Add(Converter.TransformPosition(FVector(p.x, p.y, p.z)));
 			}
-
-			outputHull.Indices.SetNumUninitialized(fh->indicesCount);
-			FMemory::Memcpy(outputHull.Indices.GetData(), fh->indices, sizeof(uint32) * fh->indicesCount);
-
-			outputHull.PolygonData.SetNumUninitialized(fh->polygonDataCount);
-			FMemory::Memcpy(outputHull.PolygonData.GetData(), fh->polygonData,
-			                sizeof(Nv::Blast::HullPolygon) * fh->polygonDataCount);
+			for (uint32 ii = 0; ii < fh->indicesCount; ii++)
+			{
+				h.Indices.Add(fh->indices[ii]);
+			}
+			for (uint32 pdi = 0; pdi < fh->polygonDataCount; pdi++)
+			{
+				h.PolygonData.Add(*reinterpret_cast<FBlastCollisionHull::HullPolygon*>(&fh->polygonData[pdi]));
+			}
+			chunkHulls.Add(h);
 		}
 	}
 	if (!UBlastMeshFactory::RebuildPhysicsAsset(BlastMesh, hulls))
@@ -956,8 +860,7 @@ bool CreatePhysicsAsset(TSharedPtr<Nv::Blast::AuthoringResult> FractureData, UBl
 	return true;
 }
 
-void FBlastFracture::RebuildCollisionMesh(UBlastFractureSettings* Settings, uint32 MaxNumOfConvex, uint32 Resolution,
-                                          float Concavity, const TSet<int32>& ChunkIndices)
+void FBlastFracture::RebuildCollisionMesh(UBlastFractureSettings* Settings, uint32_t MaxNumOfConvex, uint32_t Resolution, float Concavity, const TSet<int32>& ChunkIndices)
 {
 	FScopeLock Lock(&ExclusiveFractureSection);
 
@@ -965,8 +868,7 @@ void FBlastFracture::RebuildCollisionMesh(UBlastFractureSettings* Settings, uint
 	{
 		return;
 	}
-	FScopedSlowTask SlowTask(1, LOCTEXT("RebuildCollisionMesh",
-	                                    "Recalculating collision mesh, this may take a while."));
+	FScopedSlowTask SlowTask(1, LOCTEXT("RebuildCollisionMesh", "Recalculating collision mesh, this may take a while."));
 
 	SlowTask.MakeDialog();
 	SlowTask.EnterProgressFrame();
@@ -978,17 +880,15 @@ void FBlastFracture::RebuildCollisionMesh(UBlastFractureSettings* Settings, uint
 	Param.concavity = Concavity;
 
 	FCollisionBuilder CollisionBuilder;
-	NvBlastExtAuthoringBuildCollisionMeshes(*FractureData, CollisionBuilder, Param, ChunkIndices.Num(),
-	                                        ChunkIndices.Num() ? (uint32*)&ChunkIndices.Array()[0] : nullptr);
+	NvBlastExtAuthoringBuildCollisionMeshes(*FractureData, CollisionBuilder, Param, ChunkIndices.Num(), ChunkIndices.Num() ? (uint32_t*)&ChunkIndices.Array()[0] : nullptr);
 
 	if (FractureData->collisionHull != nullptr)
 	{
-		CreatePhysicsAsset(FractureData, Settings->FractureSession->BlastMesh);
+		CreatePhysXAsset(FractureData, Settings->FractureSession->BlastMesh);
 	}
 }
 
-void FBlastFracture::RemoveSubhierarchy(UBlastFractureSettings* Settings, TSet<int32>& SelectedChunkIndices,
-                                        bool bIncludeRoot)
+void FBlastFracture::RemoveSubhierarchy(UBlastFractureSettings* Settings, TSet<int32>& SelectedChunkIndices, bool bIncludeRoot)
 {
 	FScopeLock Lock(&ExclusiveFractureSection);
 
@@ -1001,7 +901,7 @@ void FBlastFracture::RemoveSubhierarchy(UBlastFractureSettings* Settings, TSet<i
 	bool IsMeshChanged = false;
 	for (int32 ChunkIndex : SelectedChunkIndices)
 	{
-		int32 FractureChunkId = GetFractureChunkId(FractureSession, ChunkIndex);
+		int32_t FractureChunkId = GetFractureChunkId(FractureSession, ChunkIndex);
 		IsMeshChanged |= FractureSession->FractureTool->deleteChunkSubhierarchy(FractureChunkId, bIncludeRoot);
 		auto Generator = FractureSession->SitesGeneratorMap.Find(FractureChunkId);
 		if (Generator != nullptr && Generator->Generator.IsValid())
@@ -1017,8 +917,20 @@ void FBlastFracture::RemoveSubhierarchy(UBlastFractureSettings* Settings, TSet<i
 	}
 }
 
-void FBlastFracture::ReloadGraphicsMesh(FFractureSessionPtr FractureSession, int32 DefaultSupportDepth,
-                                        UStaticMesh* InSourceStaticMesh, UMaterialInterface* InteriorMaterial)
+void BoneRearragementDfs(uint32 v,TArray<TArray<uint32>> & graph, TArray<bool>& used, TArray<uint32>& chunkListInOrder)
+{
+	used[v] = true;
+	for (int32 id = 0; id < graph[v].Num(); ++id)
+	{
+		if (!used[graph[v][id]])
+		{
+			BoneRearragementDfs(graph[v][id], graph, used, chunkListInOrder);
+		}
+	}
+	chunkListInOrder.Add(v);
+}
+
+void FBlastFracture::ReloadGraphicsMesh(FFractureSessionPtr FractureSession, int32_t DefaultSupportDepth, UStaticMesh* InSourceStaticMesh, UMaterialInterface* InteriorMaterial)
 {
 	TComponentReregisterContext<USkinnedMeshComponent> ReregisterContext;
 	auto FS = FractureSession.Pin();
@@ -1032,16 +944,12 @@ void FBlastFracture::ReloadGraphicsMesh(FFractureSessionPtr FractureSession, int
 		{
 			FBlastScopedProfiler EAPFP("NvBlastExtAuthoringProcessFracture");
 			FS->FractureData = TSharedPtr<Nv::Blast::AuthoringResult>(
-				NvBlastExtAuthoringProcessFracture(*FS->FractureTool, *BondGenerator, CollisionBuilder, param,
-				                                   DefaultSupportDepth),
+				NvBlastExtAuthoringProcessFracture(*FS->FractureTool, *BondGenerator, CollisionBuilder, param, DefaultSupportDepth),
 				[](Nv::Blast::AuthoringResult* p)
-				{
-					if (p)
-					{
-						FCollisionBuilder CollisionBuilder;
-						NvBlastExtAuthoringReleaseAuthoringResult(CollisionBuilder, p);
-					}
-				});
+			{
+				FCollisionBuilder CollisionBuilder;
+				NvBlastExtAuthoringReleaseAuthoringResult(CollisionBuilder, p);
+			});
 		}
 		BondGenerator->release();
 		if (!FS->FractureData.IsValid())
@@ -1055,8 +963,35 @@ void FBlastFracture::ReloadGraphicsMesh(FFractureSessionPtr FractureSession, int
 	}
 
 
-	if (FS->ChunkToBoneIndex.IsEmpty())
+	if (FS->ChunkToBoneIndex.Num() == 0)
 	{
+		TArray<uint32_t> chunkListInOrder;
+
+		{
+			TArray<TArray<uint32_t> > graph;
+			graph.SetNum(FS->FractureData->chunkCount);
+			for (uint32 ci = 0; ci < FS->FractureData->chunkCount; ++ci)
+			{
+				if (FS->FractureData->chunkDescs[ci].parentChunkIndex != UINT32_MAX)
+				{
+					graph[FS->FractureData->chunkDescs[ci].parentChunkIndex].Add(ci);
+				}
+			}
+
+			TArray<bool> used;
+			used.SetNumZeroed(FS->FractureData->chunkCount);
+
+			chunkListInOrder.Add(0);
+			used[0] = true;
+			for (uint32 ci = 0; ci < FS->FractureData->chunkCount; ++ci)
+			{
+				if (!used[ci])
+				{
+					BoneRearragementDfs(ci, graph, used, chunkListInOrder);
+				}
+			}
+		}
+
 		FS->ChunkToBoneIndexPrev = FS->ChunkToBoneIndex;
 		FS->ChunkToBoneIndex.Empty();
 		FS->ChunkToBoneIndex.Add(INDEX_NONE, 0);
@@ -1072,38 +1007,48 @@ void FBlastFracture::ReloadGraphicsMesh(FFractureSessionPtr FractureSession, int
 		BlastMesh->Mesh->ReleaseResources();
 		BlastMesh->Mesh->ReleaseResourcesFence.Wait();
 	}
-	CreateSkeletalMeshFromAuthoring(FS, InteriorMaterial);
-
+	CreateSkeletalMeshFromAuthoring(FS, false, InteriorMaterial);
+	
 	BlastMesh->RebuildIndexToBoneNameMap();
 	BlastMesh->PostLoad();
 };
 
-bool FBlastFracture::LoadFractureData(FFractureSessionPtr FractureSession, int32 DefaultSupportDepth,
-                                      UStaticMesh* InSourceStaticMesh)
+bool FBlastFracture::LoadFractureData(FFractureSessionPtr FractureSession, int32_t DefaultSupportDepth, UStaticMesh* InSourceStaticMesh)
 {
-	const auto FS = FractureSession.Pin();
-	if (!FS.IsValid() || (InSourceStaticMesh == nullptr) && !FS->BlastMesh)
+	auto FS = FractureSession.Pin();
+	UBlastMesh* BlastMesh = FS->BlastMesh;
+	if (!FS.IsValid() || (InSourceStaticMesh == nullptr && BlastMesh == nullptr))
 	{
 		return false;
 	}
 
+	if (FS->FractureData.IsValid())
+	{
+		FS->FractureIdMap.Reset(FS->FractureData->chunkCount);
+		for (uint32 i = 0; i < FS->FractureData->chunkCount; i++)
+		{
+			FS->FractureIdMap.Add(GetFractureChunkId(FS, i));
+		}
+	}
+	else
+	{
+		FS->FractureIdMap.Empty();
+	}
+
 	FCollisionBuilder CollisionBuilder;
-	Nv::Blast::BlastBondGenerator* BondGenerator = NvBlastExtAuthoringCreateBondGenerator(&CollisionBuilder);
+	auto BondGenerator = NvBlastExtAuthoringCreateBondGenerator(&CollisionBuilder);
 	Nv::Blast::ConvexDecompositionParams param;
-	param.maximumNumberOfHulls = 1; // convex decomposition is slow AF, like 1 minute+, so we skip it
+	param.maximumNumberOfHulls = 1;
+	param.voxelGridResolution = 0;
 	{
 		FBlastScopedProfiler EAPFP("NvBlastExtAuthoringProcessFracture");
 		FS->FractureData = TSharedPtr<Nv::Blast::AuthoringResult>(
-			NvBlastExtAuthoringProcessFracture(*FS->FractureTool, *BondGenerator, CollisionBuilder, param,
-			                                   DefaultSupportDepth),
+			NvBlastExtAuthoringProcessFracture(*FS->FractureTool, *BondGenerator, CollisionBuilder, param, DefaultSupportDepth),
 			[](Nv::Blast::AuthoringResult* p)
-			{
-				if (p)
-				{
-					FCollisionBuilder CollisionBuilder;
-					NvBlastExtAuthoringReleaseAuthoringResult(CollisionBuilder, p);
-				}
-			});
+		{
+			FCollisionBuilder CollisionBuilder;
+			NvBlastExtAuthoringReleaseAuthoringResult(CollisionBuilder, p);
+		});
 	}
 	BondGenerator->release();
 	if (!FS->FractureData.IsValid())
@@ -1111,6 +1056,33 @@ bool FBlastFracture::LoadFractureData(FFractureSessionPtr FractureSession, int32
 		return false;
 	}
 	FS->IsRootFractured = true;
+
+	TArray<uint32_t> chunkListInOrder;
+
+	{
+		TArray<TArray<uint32_t> > graph;
+		graph.SetNum(FS->FractureData->chunkCount);
+		for (uint32 ci = 0; ci < FS->FractureData->chunkCount; ++ci)
+		{
+			if (FS->FractureData->chunkDescs[ci].parentChunkIndex != UINT32_MAX)
+			{
+				graph[FS->FractureData->chunkDescs[ci].parentChunkIndex].Add(ci);
+			}
+		}
+
+		TArray<bool> used;
+		used.SetNumZeroed(FS->FractureData->chunkCount);
+
+		chunkListInOrder.Add(0);
+		used[0] = true;
+		for (uint32 ci = 0; ci < FS->FractureData->chunkCount; ++ci)
+		{
+			if (!used[ci])
+			{
+				BoneRearragementDfs(ci, graph, used, chunkListInOrder);
+			}
+		}
+	}
 
 	FS->ChunkToBoneIndexPrev = FS->ChunkToBoneIndex;
 	FS->ChunkToBoneIndex.Empty();
@@ -1127,41 +1099,51 @@ bool FBlastFracture::LoadFractureData(FFractureSessionPtr FractureSession, int32
 void FBlastFracture::LoadFractureToolData(TSharedPtr<FFractureSession> FS)
 {
 	FBlastFractureToolData* FTD = &FS->BlastMesh->FractureHistory.GetCurrentToolData();
-	const int32 ChunkCount = FS->FractureTool->getChunkCount();
-	FTD->ChunkMeshes.Reset(ChunkCount);
-
-	for (int32 AssetIndex = 0; AssetIndex < ChunkCount; AssetIndex++)
+	uint32_t ChunkCount = FS->FractureTool->getChunkCount();
+	FTD->VerticesOffset.Reset(ChunkCount + 1);
+	FTD->EdgesOffset.Reset(ChunkCount + 1);
+	FTD->FacesOffset.Reset(ChunkCount + 1);
+	FTD->VerticesOffset.Push(0);
+	FTD->EdgesOffset.Push(0);
+	FTD->FacesOffset.Push(0);
+	for (uint32_t AssetIndex = 0; AssetIndex < ChunkCount; AssetIndex++)
 	{
-		FBlastChunkMesh& Chunk = FTD->ChunkMeshes.AddDefaulted_GetRef();
-		const Nv::Blast::ChunkInfo& Info = FS->FractureTool->getChunkInfo(
-			GetChunkToolIndexFromSessionIndex(FS, AssetIndex));
+		const uint32_t ChunkIndex = FS->FractureTool->getChunkIndex(FS->FractureData->chunkDescs[AssetIndex].userData);
+		auto& Info = FS->FractureTool->getChunkInfo(ChunkIndex);
+		FTD->VerticesOffset.Push(FTD->VerticesOffset.Last() + Info.meshData->getVerticesCount());
+		FTD->EdgesOffset.Push(FTD->EdgesOffset.Last() + Info.meshData->getEdgesCount());
+		FTD->FacesOffset.Push(FTD->FacesOffset.Last() + Info.meshData->getFacetCount());
+	}
+	FTD->Vertices.SetNumUninitialized(FTD->VerticesOffset.Last() * sizeof(Nv::Blast::Vertex));
+	FTD->Edges.SetNumUninitialized(FTD->EdgesOffset.Last() * sizeof(Nv::Blast::Edge));
+	FTD->Faces.SetNumUninitialized(FTD->FacesOffset.Last() * sizeof(Nv::Blast::Facet));
+	FTD->ChunkFlags.SetNumZeroed(ChunkCount);
 
-		const FTransform3f ChunkToWorld = FTransform3f(FQuat4f::Identity,
-		                                               FVector3f(FromNvVector(Info.getTmToWorld().t)),
-		                                               FVector3f(Info.getTmToWorld().s));
-
-		Chunk.Vertices.AddUninitialized(Info.getMesh()->getVerticesCount());
-		FMemory::Memcpy(Chunk.Vertices.GetData(), Info.getMesh()->getVertices(),
-		                Info.getMesh()->getVerticesCount() * sizeof(Nv::Blast::Vertex));
-		for (FBlastVertex& Vert : Chunk.Vertices)
+	PxVec3 Offset;
+	float Scale;
+	FS->FractureTool->getTransformation((NvcVec3&)Offset, Scale);
+	for (uint32_t AssetIndex = 0; AssetIndex < ChunkCount; AssetIndex++)
+	{
+		const uint32_t ChunkIndex = FS->FractureTool->getChunkIndex(FS->FractureData->chunkDescs[AssetIndex].userData);
+		auto& Info = FS->FractureTool->getChunkInfo(ChunkIndex);
+		FMemory::Memcpy(FTD->Vertices.GetData() + FTD->VerticesOffset[AssetIndex] * sizeof(Nv::Blast::Vertex),
+			Info.meshData->getVertices(), Info.meshData->getVerticesCount() * sizeof(Nv::Blast::Vertex));
+		for (uint32_t v = 0; v < Info.meshData->getVerticesCount(); v++)
 		{
-			Vert.P = ChunkToWorld.TransformPosition(Vert.P);
+			(PxVec3&)((Nv::Blast::Vertex*)FTD->Vertices.GetData() + FTD->VerticesOffset[AssetIndex] + v)->p = (PxVec3&)Info.meshData->getVertices()[v].p * Scale + Offset;
 		}
-		Chunk.Edges.AddUninitialized(Info.getMesh()->getEdgesCount());
-		FMemory::Memcpy(Chunk.Edges.GetData(),
-		                Info.getMesh()->getEdges(), Info.getMesh()->getEdgesCount() * sizeof(Nv::Blast::Edge));
-		Chunk.Faces.AddUninitialized(Info.getMesh()->getFacetCount());
-		FMemory::Memcpy(Chunk.Faces.GetData(),
-		                Info.getMesh()->getFacetsBuffer(), Info.getMesh()->getFacetCount() * sizeof(Nv::Blast::Facet));
-		if (Info.flags & (uint32)Nv::Blast::ChunkInfo::APPROXIMATE_BONDING)
+		FMemory::Memcpy(FTD->Edges.GetData() + FTD->EdgesOffset[AssetIndex] * sizeof(Nv::Blast::Edge),
+			Info.meshData->getEdges(), Info.meshData->getEdgesCount() * sizeof(Nv::Blast::Edge));
+		FMemory::Memcpy(FTD->Faces.GetData() + FTD->FacesOffset[AssetIndex] * sizeof(Nv::Blast::Facet),
+			Info.meshData->getFacetsBuffer(), Info.meshData->getFacetCount() * sizeof(Nv::Blast::Facet));
+		if (Info.flags & (uint32_t)Nv::Blast::ChunkInfo::APPROXIMATE_BONDING)
 		{
-			Chunk.ChunkFlag |= EBlastMeshChunkFlags::ApproximateBonding;
+			FTD->ChunkFlags[AssetIndex] |= EBlastMeshChunkFlags::ApproximateBonding;
 		}
 	}
 }
 
-void FBlastFracture::LoadFracturedMesh(FFractureSessionPtr FractureSession, int32 DefaultSupportDepth,
-                                       UStaticMesh* InSourceStaticMesh, UMaterialInterface* InteriorMaterial)
+void FBlastFracture::LoadFracturedMesh(FFractureSessionPtr FractureSession, int32_t DefaultSupportDepth, UStaticMesh* InSourceStaticMesh, UMaterialInterface* InteriorMaterial)
 {
 	FBlastScopedProfiler LFMP("LoadFracturedMesh");
 	TComponentReregisterContext<USkinnedMeshComponent> ReregisterContext;
@@ -1181,14 +1163,19 @@ void FBlastFracture::LoadFracturedMesh(FFractureSessionPtr FractureSession, int3
 	}
 
 	TArray<FSkeletalMaterial> ExistingMaterials;
-	if (InSourceStaticMesh)
+	UFbxSkeletalMeshImportData* SkelMeshImportData = nullptr;
+
+	if (InSourceStaticMesh != nullptr)
 	{
-		CreateSkeletalMeshFromAuthoring(FS, *InSourceStaticMesh);
+		CreateSkeletalMeshFromAuthoring(FS, InSourceStaticMesh);
 	}
 	else
 	{
 		FBlastScopedProfiler USMFAP("UpdateSkeletalMeshFromAuthoring");
-		CreateSkeletalMeshFromAuthoring(FS, InteriorMaterial);
+
+		SkelMeshImportData = Cast<UFbxSkeletalMeshImportData>(BlastMesh->Mesh->GetAssetImportData());
+
+		UpdateSkeletalMeshFromAuthoring(FS, InteriorMaterial);
 	}
 
 	if (FS->IsMeshModified)
@@ -1199,10 +1186,10 @@ void FBlastFracture::LoadFracturedMesh(FFractureSessionPtr FractureSession, int3
 	}
 
 	//* generate NvBlastAsset and setup it for Mesh
-	UBlastMeshFactory::TransformBlastAssetToUE4CoordinateSystem(FS->FractureData->asset);
+	UBlastMeshFactory::TransformBlastAssetToUE4CoordinateSystem(FS->FractureData->asset, SkelMeshImportData);
 	BlastMesh->CopyFromLoadedAsset(FS->FractureData->asset);
 
-	if (!CreatePhysicsAsset(FS->FractureData, BlastMesh))
+	if (!CreatePhysXAsset(FS->FractureData, BlastMesh, SkelMeshImportData))
 	{
 		return;
 	}
@@ -1223,8 +1210,7 @@ void FBlastFracture::PopulateSettingsFromBlastMesh(UBlastFractureSettings* Setti
 		for (FSkeletalMaterial& MatSlot : BlastMesh->Mesh->GetMaterials())
 		{
 			const bool bCompareTrailingNumber = false;
-			if (MatSlot.ImportedMaterialSlotName.IsEqual(FBlastFracture::InteriorMaterialID, ENameCase::IgnoreCase,
-			                                             bCompareTrailingNumber))
+			if (MatSlot.ImportedMaterialSlotName.IsEqual(FBlastFracture::InteriorMaterialID, ENameCase::IgnoreCase, bCompareTrailingNumber))
 			{
 				Settings->InteriorMaterialSlotName = MatSlot.ImportedMaterialSlotName;
 				break;
@@ -1233,39 +1219,33 @@ void FBlastFracture::PopulateSettingsFromBlastMesh(UBlastFractureSettings* Setti
 	}
 }
 
-TSharedPtr<Nv::Blast::VoronoiSitesGenerator> FBlastFracture::GetVoronoiSitesGenerator(
-	TSharedPtr<FFractureSession> FractureSession, int32 FractureChunkId, bool ForceReset)
+TSharedPtr <Nv::Blast::VoronoiSitesGenerator> FBlastFracture::GetVoronoiSitesGenerator(TSharedPtr<FFractureSession> FractureSession, int32 FractureChunkId, bool ForceReset)
 {
 	auto SitesGenerator = FractureSession->SitesGeneratorMap.Find(FractureChunkId);
 	if (SitesGenerator == nullptr || !SitesGenerator->Generator.IsValid() || ForceReset)
 	{
-		const int32 chunkInfoIdx = FractureSession->FractureTool->getChunkInfoIndex(FractureChunkId);
-
 		FractureSession->SitesGeneratorMap.Remove(FractureChunkId);
-		SitesGenerator = &(FractureSession->SitesGeneratorMap.Add(FractureChunkId,
-		                                                          FFractureSession::ChunkSitesGenerator()));
-		SitesGenerator->Mesh = TSharedPtr<Nv::Blast::Mesh>(FractureSession->FractureTool->createChunkMesh(chunkInfoIdx),
-		                                                   [](Nv::Blast::Mesh* p)
-		                                                   {
-			                                                   p->release();
-		                                                   });
-		if (!SitesGenerator->Mesh)
+		SitesGenerator = &(FractureSession->SitesGeneratorMap.Add(FractureChunkId, FFractureSession::ChunkSitesGenerator()));
+		SitesGenerator->Mesh = TSharedPtr <Nv::Blast::Mesh>(FractureSession->FractureTool->createChunkMesh(FractureChunkId), [](Nv::Blast::Mesh* p)
 		{
-			return {};
+			p->release();
+		});
+		if (SitesGenerator->Mesh.Get() == nullptr)
+		{
+			return TSharedPtr <Nv::Blast::VoronoiSitesGenerator>(nullptr);
 		}
-		SitesGenerator->Generator = TSharedPtr<Nv::Blast::VoronoiSitesGenerator>(
+		SitesGenerator->Generator = TSharedPtr <Nv::Blast::VoronoiSitesGenerator>(
 			NvBlastExtAuthoringCreateVoronoiSitesGenerator(SitesGenerator->Mesh.Get(), RandomGenerator.Get()),
 			[](Nv::Blast::VoronoiSitesGenerator* p)
-			{
-				p->release();
-			});
+		{
+			p->release();
+		});
 	}
 	return SitesGenerator->Generator;
 };
 
-bool FBlastFracture::FractureVoronoi(TSharedPtr<FFractureSession> FractureSession, uint32 FractureChunkId,
-                                     int32 RandomSeed, bool IsReplace,
-                                     uint32 CellCount, FVector3f CellAnisotropy, FQuat4f CellRotation, bool ForceReset)
+bool FBlastFracture::FractureVoronoi(TSharedPtr<FFractureSession> FractureSession, uint32 FractureChunkId, int32 RandomSeed, bool IsReplace,
+	uint32 CellCount, FVector CellAnisotropy, FQuat CellRotation, bool ForceReset)
 {
 	FBlastScopedProfiler FVP("FractureVoronoi");
 	RandomGenerator->seed(RandomSeed);
@@ -1277,16 +1257,16 @@ bool FBlastFracture::FractureVoronoi(TSharedPtr<FFractureSession> FractureSessio
 			VoronoiSitesGenerator->uniformlyGenerateSitesInMesh(CellCount);
 		}
 		const NvcVec3* sites = nullptr;
-		uint32 sitesCount = VoronoiSitesGenerator->getVoronoiSites(sites);
+		uint32_t sitesCount = VoronoiSitesGenerator->getVoronoiSites(sites);
 		if (FractureSession->FractureTool->getChunkDepth(FractureChunkId) == 0)
 		{
 			IsReplace = false;
 		}
+		NvcVec3 ca = { CellAnisotropy.X, CellAnisotropy.Y, CellAnisotropy.Z };
+		NvcQuat cr = { CellRotation.X, CellRotation.Y, CellRotation.Z, CellRotation.W };
 		{
 			FBlastScopedProfiler VFP("FractureVoronoi::voronoiFracturing");
-			if (FractureSession->FractureTool->voronoiFracturing(FractureChunkId, sitesCount, sites,
-			                                                     ToNvVector(CellAnisotropy), ToNvQuat(CellRotation),
-			                                                     IsReplace) == 0)
+			if (FractureSession->FractureTool->voronoiFracturing(FractureChunkId, sitesCount, sites, ca, cr, IsReplace) == 0)
 			{
 				return true;
 			}
@@ -1296,10 +1276,8 @@ bool FBlastFracture::FractureVoronoi(TSharedPtr<FFractureSession> FractureSessio
 	return false;
 }
 
-bool FBlastFracture::FractureClusteredVoronoi(TSharedPtr<FFractureSession> FractureSession, uint32 FractureChunkId,
-                                              int32 RandomSeed, bool IsReplace,
-                                              uint32 CellCount, uint32 ClusterCount, float ClusterRadius,
-                                              FVector3f CellAnisotropy, FQuat4f CellRotation, bool ForceReset)
+bool FBlastFracture::FractureClusteredVoronoi(TSharedPtr<FFractureSession> FractureSession, uint32 FractureChunkId, int32 RandomSeed, bool IsReplace,
+	uint32 CellCount, uint32 ClusterCount, float ClusterRadius, FVector CellAnisotropy, FQuat CellRotation, bool ForceReset)
 {
 	FBlastScopedProfiler FCVP("FractureClusteredVoronoi");
 	RandomGenerator->seed(RandomSeed);
@@ -1308,14 +1286,14 @@ bool FBlastFracture::FractureClusteredVoronoi(TSharedPtr<FFractureSession> Fract
 	{
 		VoronoiSitesGenerator->clusteredSitesGeneration(ClusterCount, CellCount, ClusterRadius);
 		const NvcVec3* sites = nullptr;
-		uint32 sitesCount = VoronoiSitesGenerator->getVoronoiSites(sites);
+		uint32_t sitesCount = VoronoiSitesGenerator->getVoronoiSites(sites);
 		if (FractureSession->FractureTool->getChunkDepth(FractureChunkId) == 0)
 		{
 			IsReplace = false;
 		}
-		if (FractureSession->FractureTool->voronoiFracturing(FractureChunkId, sitesCount, sites,
-		                                                     ToNvVector(CellAnisotropy), ToNvQuat(CellRotation),
-		                                                     IsReplace) == 0)
+		NvcVec3 ca = { CellAnisotropy.X, CellAnisotropy.Y, CellAnisotropy.Z };
+		NvcQuat cr = { CellRotation.X, CellRotation.Y, CellRotation.Z, CellRotation.W };
+		if (FractureSession->FractureTool->voronoiFracturing(FractureChunkId, sitesCount, sites, ca, cr, IsReplace) == 0)
 		{
 			return true;
 		}
@@ -1324,11 +1302,9 @@ bool FBlastFracture::FractureClusteredVoronoi(TSharedPtr<FFractureSession> Fract
 	return false;
 }
 
-bool FBlastFracture::FractureRadial(TSharedPtr<FFractureSession> FractureSession, uint32 FractureChunkId,
-                                    int32 RandomSeed, bool IsReplace,
-                                    FVector3f Origin, FVector3f Normal, float Radius, uint32 AngularSteps,
-                                    uint32 RadialSteps, float AngleOffset, float Variability,
-                                    FVector3f CellAnisotropy, FQuat4f CellRotation, bool ForceReset)
+bool FBlastFracture::FractureRadial(TSharedPtr<FFractureSession> FractureSession, uint32 FractureChunkId, int32 RandomSeed, bool IsReplace,
+	FVector Origin, FVector Normal, float Radius, uint32_t AngularSteps, uint32_t RadialSteps, float AngleOffset, float Variability,
+	FVector CellAnisotropy, FQuat CellRotation, bool ForceReset)
 {
 	FBlastScopedProfiler FRP("FractureRadial");
 	RandomGenerator->seed(RandomSeed);
@@ -1336,17 +1312,18 @@ bool FBlastFracture::FractureRadial(TSharedPtr<FFractureSession> FractureSession
 	if (VoronoiSitesGenerator.IsValid())
 	{
 		Normal.Normalize();
-		VoronoiSitesGenerator->radialPattern(ToNvVector(Origin), ToNvVector(Normal), Radius, AngularSteps, RadialSteps,
-		                                     AngleOffset, Variability);
+		NvcVec3 O = { Origin.X, Origin.Y, Origin.Z };
+		NvcVec3 N = { Normal.X, Normal.Y, Normal.Z };
+		VoronoiSitesGenerator->radialPattern(O, N, Radius, AngularSteps, RadialSteps, AngleOffset, Variability);
 		const NvcVec3* sites = nullptr;
-		uint32 sitesCount = VoronoiSitesGenerator->getVoronoiSites(sites);
+		uint32_t sitesCount = VoronoiSitesGenerator->getVoronoiSites(sites);
 		if (FractureSession->FractureTool->getChunkDepth(FractureChunkId) == 0)
 		{
 			IsReplace = false;
 		}
-		if (FractureSession->FractureTool->voronoiFracturing(FractureChunkId, sitesCount, sites,
-		                                                     ToNvVector(CellAnisotropy), ToNvQuat(CellRotation),
-		                                                     IsReplace) == 0)
+		NvcVec3 ca = { CellAnisotropy.X, CellAnisotropy.Y, CellAnisotropy.Z };
+		NvcQuat cr = { CellRotation.X, CellRotation.Y, CellRotation.Z, CellRotation.W };
+		if (FractureSession->FractureTool->voronoiFracturing(FractureChunkId, sitesCount, sites, ca, cr, IsReplace) == 0)
 		{
 			return true;
 		}
@@ -1355,26 +1332,25 @@ bool FBlastFracture::FractureRadial(TSharedPtr<FFractureSession> FractureSession
 	return false;
 }
 
-bool FBlastFracture::FractureInSphere(TSharedPtr<FFractureSession> FractureSession, uint32 FractureChunkId,
-                                      int32 RandomSeed, bool IsReplace,
-                                      uint32 CellCount, float Radius, FVector3f Origin, FVector3f CellAnisotropy,
-                                      FQuat4f CellRotation, bool ForceReset)
+bool FBlastFracture::FractureInSphere(TSharedPtr<FFractureSession> FractureSession, uint32 FractureChunkId, int32 RandomSeed, bool IsReplace,
+	uint32 CellCount, float Radius, FVector Origin, FVector CellAnisotropy, FQuat CellRotation, bool ForceReset)
 {
 	FBlastScopedProfiler FISP("FractureInSphere");
 	RandomGenerator->seed(RandomSeed);
 	auto VoronoiSitesGenerator = GetVoronoiSitesGenerator(FractureSession, FractureChunkId, ForceReset);
 	if (VoronoiSitesGenerator.IsValid())
 	{
-		VoronoiSitesGenerator->generateInSphere(CellCount, Radius, ToNvVector(Origin));
+		NvcVec3 O = { Origin.X, Origin.Y, Origin.Z };
+		VoronoiSitesGenerator->generateInSphere(CellCount, Radius, O);
 		const NvcVec3* sites = nullptr;
-		uint32 sitesCount = VoronoiSitesGenerator->getVoronoiSites(sites);
+		uint32_t sitesCount = VoronoiSitesGenerator->getVoronoiSites(sites);
 		if (FractureSession->FractureTool->getChunkDepth(FractureChunkId) == 0)
 		{
 			IsReplace = false;
 		}
-		if (FractureSession->FractureTool->voronoiFracturing(FractureChunkId, sitesCount, sites,
-		                                                     ToNvVector(CellAnisotropy), ToNvQuat(CellRotation),
-		                                                     IsReplace) == 0)
+		NvcVec3 ca = { CellAnisotropy.X, CellAnisotropy.Y, CellAnisotropy.Z };
+		NvcQuat cr = { CellRotation.X, CellRotation.Y, CellRotation.Z, CellRotation.W };
+		if (FractureSession->FractureTool->voronoiFracturing(FractureChunkId, sitesCount, sites, ca, cr, IsReplace) == 0)
 		{
 			return true;
 		}
@@ -1383,18 +1359,18 @@ bool FBlastFracture::FractureInSphere(TSharedPtr<FFractureSession> FractureSessi
 	return false;
 }
 
-bool FBlastFracture::RemoveInSphere(TSharedPtr<FFractureSession> FractureSession, uint32 FractureChunkId,
-                                    int32 RandomSeed, bool IsReplace,
-                                    float Radius, FVector3f Origin, float Probability, bool ForceReset)
+bool FBlastFracture::RemoveInSphere(TSharedPtr<FFractureSession> FractureSession, uint32 FractureChunkId, int32 RandomSeed, bool IsReplace,
+	float Radius, FVector Origin, float Probability, bool ForceReset)
 {
 	FBlastScopedProfiler RISP("RemoveInSphere");
 	RandomGenerator->seed(RandomSeed);
 	auto VoronoiSitesGenerator = GetVoronoiSitesGenerator(FractureSession, FractureChunkId, ForceReset);
 	if (VoronoiSitesGenerator.IsValid())
 	{
-		VoronoiSitesGenerator->deleteInSphere(Radius, ToNvVector(Origin), Probability);
+		NvcVec3 O = { Origin.X, Origin.Y, Origin.Z };
+		VoronoiSitesGenerator->deleteInSphere(Radius, O, Probability);
 		const NvcVec3* sites = nullptr;
-		uint32 sitesCount = VoronoiSitesGenerator->getVoronoiSites(sites);
+		uint32_t sitesCount = VoronoiSitesGenerator->getVoronoiSites(sites);
 		if (FractureSession->FractureTool->getChunkDepth(FractureChunkId) == 0)
 		{
 			IsReplace = false;
@@ -1408,11 +1384,9 @@ bool FBlastFracture::RemoveInSphere(TSharedPtr<FFractureSession> FractureSession
 	return false;
 }
 
-bool FBlastFracture::FractureUniformSlicing(TSharedPtr<FFractureSession> FractureSession, uint32 FractureChunkId,
-                                            int32 RandomSeed, bool IsReplace,
-                                            FIntVector SlicesCount, float AngleVariation, float OffsetVariation,
-                                            float NoiseAmplitude, float NoiseFrequency, int32 NoiseOctaveNumber,
-                                            FVector3f SamplingInterval)
+bool FBlastFracture::FractureUniformSlicing(TSharedPtr<FFractureSession> FractureSession, uint32 FractureChunkId, int32 RandomSeed, bool IsReplace,
+	FIntVector SlicesCount, float AngleVariation, float OffsetVariation, 
+	float NoiseAmplitude, float NoiseFrequency, int32 NoiseOctaveNumber, FVector SamplingInterval)
 {
 	FBlastScopedProfiler FUSP("FractureUniformSlicing");
 	RandomGenerator->seed(RandomSeed);
@@ -1425,7 +1399,7 @@ bool FBlastFracture::FractureUniformSlicing(TSharedPtr<FFractureSession> Fractur
 	slConfig.noise.amplitude = NoiseAmplitude;
 	slConfig.noise.frequency = NoiseFrequency;
 	slConfig.noise.octaveNumber = NoiseOctaveNumber;
-	slConfig.noise.samplingInterval = ToNvVector(SamplingInterval);
+	slConfig.noise.samplingInterval = { SamplingInterval.X, SamplingInterval.Y, SamplingInterval.Z };
 	if (FractureSession->FractureTool->getChunkDepth(FractureChunkId) == 0)
 	{
 		IsReplace = false;
@@ -1438,52 +1412,49 @@ bool FBlastFracture::FractureUniformSlicing(TSharedPtr<FFractureSession> Fractur
 	return true;
 }
 
-bool FBlastFracture::FractureCutout(TSharedPtr<FFractureSession> FractureSession, uint32 FractureChunkId,
-                                    int32 RandomSeed, bool IsReplace,
-                                    UTexture2D* Pattern, FVector3f Origin, FVector3f Normal, FVector2f Size,
-                                    float RotationZ, float Aperture, bool bPeriodic, bool bFillGaps,
-                                    float NoiseAmplitude, float NoiseFrequency, int32 NoiseOctaveNumber,
-                                    FVector3f SamplingInterval)
+bool FBlastFracture::FractureCutout(TSharedPtr<FFractureSession> FractureSession, uint32 FractureChunkId, int32 RandomSeed, bool IsReplace,
+	UTexture2D* Pattern, FVector Origin, FVector Normal, FVector2D Size, float RotationZ, float Aperture, bool bPeriodic, bool bFillGaps,
+	float NoiseAmplitude, float NoiseFrequency, int32 NoiseOctaveNumber, FVector SamplingInterval)
 {
 	FBlastScopedProfiler FCP("FractureCutout");
 	RandomGenerator->seed(RandomSeed);
 
 	Normal.Normalize();
-	FTransform3f UE4ToBlastTransform = UBlastMesh::GetTransformUEToBlastCoordinateSystem();
-	//FTransform3f ScaleTr; ScaleTr.SetScale3D(FVector3f(Scale.X, Scale.Y, 1.f) * 0.5f);
-	FTransform3f YawTr(FQuat4f(FVector3f(0.f, 0.f, 1.f), FMath::DegreesToRadians(RotationZ)));
-	FTransform3f Tr(FQuat4f::FindBetweenNormals(FVector3f(0.f, 0.f, 1.f), Normal), Origin);
+	auto UE4ToBlastTransform = UBlastMeshFactory::GetTransformUE4ToBlastCoordinateSystem(Cast<UFbxSkeletalMeshImportData>(FractureSession->BlastMesh->Mesh->GetAssetImportData()));
+	//FTransform ScaleTr; ScaleTr.SetScale3D(FVector(Scale.X, Scale.Y, 1.f) * 0.5f);
+	FTransform YawTr(FQuat(FVector(0.f, 0.f, 1.f), FMath::DegreesToRadians(RotationZ)));
+	FTransform Tr(FQuat::FindBetweenNormals(FVector(0.f, 0.f, 1.f), Normal), Origin);
 	Tr = YawTr * Tr * UE4ToBlastTransform;
 
 	Nv::Blast::CutoutConfiguration CutoutConfig;
-	CutoutConfig.transform.q = ToNvQuat(Tr.GetRotation());
-	CutoutConfig.transform.p = ToNvVector(Tr.GetLocation());
-	CutoutConfig.scale = {Size.X, Size.Y};
+	CutoutConfig.transform =
+		{ { Tr.GetRotation().X, Tr.GetRotation().Y, Tr.GetRotation().Z, Tr.GetRotation().W },
+		  { Tr.GetLocation().X, Tr.GetLocation().Y, Tr.GetLocation().Z } };
+	CutoutConfig.scale = { Size.X, Size.Y };
 	CutoutConfig.isRelativeTransform = false;
 	//CutoutConfig.useSmoothing = true;
 	CutoutConfig.aperture = Aperture;
 	CutoutConfig.noise.amplitude = NoiseAmplitude;
 	CutoutConfig.noise.frequency = NoiseFrequency;
 	CutoutConfig.noise.octaveNumber = NoiseOctaveNumber;
-	CutoutConfig.noise.samplingInterval = ToNvVector(SamplingInterval);
+	CutoutConfig.noise.samplingInterval = { SamplingInterval.X, SamplingInterval.Y, SamplingInterval.Z };
 	if (Pattern != nullptr)
 	{
 		CutoutConfig.cutoutSet = NvBlastExtAuthoringCreateCutoutSet();
-
-		TArray64<uint8> Buf;
-		FImage Img;
-		Pattern->Source.GetMipImage(Img, 0);
+		
+		TArray64 <uint8_t> Buf, Mip; 
+		Pattern->Source.GetMipData(Mip, 0);
 		int32 sz = Pattern->Source.GetSizeX() * Pattern->Source.GetSizeY();
-		Buf.SetNumZeroed(sz * 3);
+		Buf.Reserve(sz * 3);
 		for (int32 i = 0; i < sz; i++)
 		{
-			FMemory::Memset(Buf.GetData() + i*3, Img.RawData[i * Img.GetBytesPerPixel()], 3);
+			Buf.Push(Mip[i * 4]);
+			Buf.Push(Mip[i * 4 + 1]);
+			Buf.Push(Mip[i * 4 + 2]);
 		}
 		float SegmentationErrorThreshold = 1e-3; //Move this to advanced settings?
 		float SnapThreshold = 1.f;
-		NvBlastExtAuthoringBuildCutoutSet(*CutoutConfig.cutoutSet, Buf.GetData(), Pattern->Source.GetSizeX(),
-		                                  Pattern->Source.GetSizeY(), SegmentationErrorThreshold, SnapThreshold,
-		                                  bPeriodic, bFillGaps);
+		NvBlastExtAuthoringBuildCutoutSet(*CutoutConfig.cutoutSet, Buf.GetData(), Pattern->Source.GetSizeX(), Pattern->Source.GetSizeY(), SegmentationErrorThreshold, SnapThreshold, bPeriodic, bFillGaps);
 	}
 	else
 	{
@@ -1504,19 +1475,17 @@ bool FBlastFracture::FractureCutout(TSharedPtr<FFractureSession> FractureSession
 
 bool FBlastFracture::FractureChunksFromIslands(TSharedPtr<FFractureSession> FractureSession, uint32 FractureChunkId)
 {
-	if (!FractureSession->BlastMesh)
+	if (FractureChunkId != 0 || FractureSession->BlastMesh == nullptr)
 	{
 		return false;
 	}
-
-	return FractureSession->FractureTool->islandDetectionAndRemoving(FractureChunkId, true) > 0;
+	FractureSession->FractureTool->islandDetectionAndRemoving(0, true);
+	return true;
 }
 
-bool FBlastFracture::FractureCut(TSharedPtr<FFractureSession> FractureSession, uint32 FractureChunkId, int32 RandomSeed,
-                                 bool IsReplace,
-                                 FVector3f Origin, FVector3f Normal,
-                                 float NoiseAmplitude, float NoiseFrequency, int32 NoiseOctaveNumber,
-                                 FVector3f SamplingInterval)
+bool FBlastFracture::FractureCut(TSharedPtr<FFractureSession> FractureSession, uint32 FractureChunkId, int32 RandomSeed, bool IsReplace,
+	FVector Origin, FVector Normal,
+	float NoiseAmplitude, float NoiseFrequency, int32 NoiseOctaveNumber, FVector SamplingInterval)
 {
 	Normal.Normalize();
 	RandomGenerator->seed(RandomSeed);
@@ -1524,13 +1493,12 @@ bool FBlastFracture::FractureCut(TSharedPtr<FFractureSession> FractureSession, u
 	NoiseConfig.amplitude = NoiseAmplitude;
 	NoiseConfig.frequency = NoiseFrequency;
 	NoiseConfig.octaveNumber = NoiseOctaveNumber;
-	NoiseConfig.samplingInterval = ToNvVector(SamplingInterval);
+	NoiseConfig.samplingInterval = { SamplingInterval.X, SamplingInterval.Y, SamplingInterval.Z };
 	if (FractureSession->FractureTool->getChunkDepth(FractureChunkId) == 0)
 	{
 		IsReplace = false;
 	}
-	if (FractureSession->FractureTool->cut(FractureChunkId, ToNvVector(Normal), ToNvVector(Origin), NoiseConfig,
-	                                       IsReplace, RandomGenerator.Get()) != 0)
+	if (FractureSession->FractureTool->cut(FractureChunkId, NvcVec3({ Normal.X, Normal.Y, Normal.Z }), NvcVec3({ Origin.X, Origin.Y, Origin.Z }), NoiseConfig, IsReplace, RandomGenerator.Get()) != 0)
 	{
 		UE_LOG(LogBlastMeshEditor, Error, TEXT("Failed to perform cut fracture"));
 		return false;
@@ -1545,7 +1513,7 @@ TSharedPtr<FBlastFracture> FBlastFracture::GetInstance()
 	TSharedPtr<FBlastFracture> SharedPtr;
 	if (!Instance.IsValid())
 	{
-		SharedPtr = MakeShared<FBlastFracture>();
+		SharedPtr = MakeShareable(new FBlastFracture());
 		Instance = SharedPtr;
 	}
 	return Instance.Pin();

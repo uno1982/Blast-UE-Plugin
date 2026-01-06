@@ -39,8 +39,8 @@ TSharedRef<SWidget> SBlastVectorViewportToolBar::MakeTransformToolBar(const TSha
 	FToolBarBuilder ToolbarBuilder(CommandList, FMultiBoxCustomization::None, InExtenders);
 
 	// Use a custom style
-	FName ToolBarStyle = "EditorViewportToolBar";
-	ToolbarBuilder.SetStyle(&FAppStyle::Get(), ToolBarStyle);
+	FName ToolBarStyle = "ViewportMenu";
+	ToolbarBuilder.SetStyle(&FEditorStyle::Get(), ToolBarStyle);
 	ToolbarBuilder.SetLabelVisibility(EVisibility::Collapsed);
 
 	// Transform controls cannot be focusable as it fights with the press space to change transform mode feature
@@ -91,8 +91,10 @@ void SBlastMeshEditorViewportToolbar::Construct(const FArguments& InArgs, TWeakP
 	this->ChildSlot
 	[
 		SNew(SBorder)
-		.BorderImage(FAppStyle::GetBrush("NoBorder"))
-		.ForegroundColor(FAppStyle::GetSlateColor(DefaultForegroundName))
+		.BorderImage(FEditorStyle::GetBrush("NoBorder"))
+		// Color and opacity is changed based on whether or not the mouse cursor is hovering over the toolbar area
+		.ColorAndOpacity(this, &SViewportToolBar::OnGetColorAndOpacity)
+		.ForegroundColor(FEditorStyle::GetSlateColor(DefaultForegroundName))
 		[
 			SNew(SHorizontalBox)
 
@@ -258,7 +260,7 @@ const FSlateBrush* SBlastMeshEditorViewportToolbar::GetCameraMenuLabelIcon() con
 		}
 	}
 
-	return FAppStyle::GetBrush(Icon);
+	return FEditorStyle::GetBrush(Icon);
 }
 
 TSharedRef<SWidget> SBlastMeshEditorViewportToolbar::GenerateCameraMenu() const
@@ -314,7 +316,7 @@ TSharedRef<SWidget> SBlastMeshEditorViewportToolbar::GenerateFOVMenu() const
 			.WidthOverride(100.0f)
 			[
 				SNew(SSpinBox<float>)
-				.Font(FAppStyle::GetFontStyle(TEXT("MenuItem.Font")))
+				.Font(FEditorStyle::GetFontStyle(TEXT("MenuItem.Font")))
 				.MinValue(FOVMin)
 				.MaxValue(FOVMax)
 				.Value(this, &SBlastMeshEditorViewportToolbar::OnGetFOVValue)

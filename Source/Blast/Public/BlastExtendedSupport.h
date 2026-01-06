@@ -14,7 +14,7 @@ struct FBlastExtendedStructureComponent
 	GENERATED_BODY()
 
 	UPROPERTY(VisibleAnywhere, Category = "Blast")
-	TObjectPtr<UBlastMeshComponent> MeshComponent = nullptr;
+	UBlastMeshComponent* MeshComponent;
 
 	UPROPERTY(VisibleAnywhere, Category = "Blast")
 	FGuid GUIDAtMerge;
@@ -38,7 +38,7 @@ public:
 
 protected:
 	UPROPERTY(EditInstanceOnly, Category = "Blast")
-	TArray<TObjectPtr<AActor>> StructureActors;
+	TArray<AActor*> StructureActors;
 
 	/**
 		Maximal distance between chunks in which bond generation allowed. If equal to zero, only touching chunks will be connected.
@@ -47,7 +47,7 @@ protected:
 	float bondGenerationDistance;
 
 	UPROPERTY(VisibleAnywhere, Category = "Blast")
-	TObjectPtr<UBlastExtendedSupportMeshComponent> ExtendedSupportMesh;
+	UBlastExtendedSupportMeshComponent* ExtendedSupportMesh;
 public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Blast")

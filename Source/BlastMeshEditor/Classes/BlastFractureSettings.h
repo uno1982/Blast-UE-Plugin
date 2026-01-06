@@ -17,12 +17,12 @@ class UBlastMesh;
 
 namespace Nv
 {
-	namespace Blast
-	{
-		class FractureTool;
-		class VoronoiSitesGenerator;
-		class Mesh;
-	}
+namespace Blast
+{
+class FractureTool;
+class VoronoiSitesGenerator;
+class Mesh;
+}
 }
 
 USTRUCT()
@@ -31,18 +31,18 @@ struct FBlastVector
 	GENERATED_USTRUCT_BODY()
 
 	FBlastVector() {}
-	FBlastVector(EBlastViewportControlMode InDefaultControlMode, const FVector3f& Vector)
+	FBlastVector(EBlastViewportControlMode InDefaultControlMode, const FVector& Vector)
 		: V(Vector), DefaultControlMode(InDefaultControlMode)
 	{
 	}
 
-	const FBlastVector& operator= (const FVector3f& Vector)
+	const FBlastVector& operator= (const FVector& Vector)
 	{
 		V = Vector;
 		return *this;
 	}
 
-	operator FVector3f() const
+	operator FVector() const
 	{
 		return V;
 	}
@@ -53,7 +53,7 @@ struct FBlastVector
 		IsActive = true;
 	}
 
-	FVector3f V;
+	FVector V;
 	EBlastViewportControlMode DefaultControlMode = EBlastViewportControlMode::Point;
 	FBlastVector* DefaultBlastVectorActivation = nullptr;
 	bool IsActive = false;
@@ -93,28 +93,28 @@ struct FBlastFractureMaterial
 	 * The UV scale (geometric distance/unit texture distance) for interior materials.
 	 * Default = (100.0f,100.0f).
 	 */
-	UPROPERTY(EditAnywhere, Category = FractureMaterial)
-	FVector2f	UVScale;
+	UPROPERTY(EditAnywhere, Category=FractureMaterial)
+	FVector2D	UVScale;
 
 	/**
 	 * A UV origin offset for interior materials.
 	 * Default = (0.0f,0.0f).
 	 */
-	UPROPERTY(EditAnywhere, Category = FractureMaterial)
-	FVector2f	UVOffset;
+	UPROPERTY(EditAnywhere, Category=FractureMaterial)
+	FVector2D	UVOffset;
 
 	/**
 	 * Object-space vector specifying surface tangent direction.  If this vector is (0.0f,0.0f,0.0f), then an arbitrary direction will be chosen.
 	 * Default = (0.0f,0.0f,0.0f).
 	 */
-	UPROPERTY(EditAnywhere, Category = FractureMaterial)
-	FVector3f	Tangent;
+	UPROPERTY(EditAnywhere, Category=FractureMaterial)
+	FVector		Tangent;
 
 	/**
 	 * Angle from tangent direction for the u coordinate axis.
 	 * Default = 0.0f.
 	 */
-	UPROPERTY(EditAnywhere, Category = FractureMaterial)
+	UPROPERTY(EditAnywhere, Category=FractureMaterial)
 	float		UAngle;
 
 	/**
@@ -122,7 +122,7 @@ struct FBlastFractureMaterial
 	 * If a negative index is given, a new element will be created for interior triangles.
 	 * Default = -1
 	 */
-	UPROPERTY(EditAnywhere, Category = FractureMaterial)
+	UPROPERTY(EditAnywhere, Category=FractureMaterial)
 	int32		InteriorElementIndex;
 
 	FBlastFractureMaterial()
@@ -268,36 +268,12 @@ class UBlastRebuildCollisionMeshProperties : public UObject
 DECLARE_DELEGATE(FOnStaticMeshSelected);
 
 UCLASS()
-class UBlastStaticMeshCopyCollisionProperties : public UObject
+class UBlastStaticMeshHolder : public UObject
 {
 	GENERATED_UCLASS_BODY()
 
 	UPROPERTY(EditAnywhere, Category = Import, Transient)
-	TObjectPtr<class UStaticMesh> StaticMesh;
-
-	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& e) override;
-
-	FOnStaticMeshSelected OnStaticMeshSelected;
-};
-
-UCLASS()
-class UBlastImportSettings : public UObject
-{
-	GENERATED_UCLASS_BODY()
-
-	// If true, will attempt to clean up the mesh to be better suited for Blast
-	// Avoid this setting for hollow meshes
-	UPROPERTY(EditAnywhere, Category = Import, Transient)
-	bool bCleanMesh = false;
-};
-
-UCLASS()
-class UBlastStaticMeshHolder : public UBlastImportSettings
-{
-	GENERATED_UCLASS_BODY()
-
-	UPROPERTY(EditAnywhere, Category = Import, Transient)
-	TObjectPtr<class UStaticMesh> StaticMesh;
+	class UStaticMesh* StaticMesh = nullptr;
 
 	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& e) override;
 
@@ -339,9 +315,9 @@ class UBlastFractureSettingsNoise : public UObject
 	Note: too small sampling interval (and too consecuently too big amount of samples) may lead to significant increase of authoring time
 	*/
 	UPROPERTY(EditAnywhere, AdvancedDisplay, Category = Noise, meta = (ClampMin = "0", UIMin = "0"))
-	FVector3f								SamplingInterval;
+	FVector									SamplingInterval;
 
-	void Setup(float InAmplitude, float InFrequency, int32 InOctaveNumber, FVector3f InSamplingInterval);
+	void Setup(float InAmplitude, float InFrequency, int32 InOctaveNumber, FVector InSamplingInterval);
 	void Setup(const UBlastFractureSettingsNoise& Other);
 };
 
@@ -356,13 +332,13 @@ class UBlastFractureSettingsVoronoi : public UObject
 
 	/** Cells scale along X, Y, Z axis. */
 	UPROPERTY(EditAnywhere, Category = VoronoiFracture)
-	FVector3f								CellAnisotropy;
+	FVector									CellAnisotropy;
 
 	/** Cells rotation around X, Y, Z axis.  Has no effect without cells anisotropy. */
 	UPROPERTY(EditAnywhere, Category = VoronoiFracture)
-	FQuat4f									CellRotation;
+	FQuat									CellRotation;
 
-	void Setup(bool InForceReset, const FVector3f& InAnisotropy, const FQuat4f& InRotation);
+	void Setup(bool InForceReset, const FVector& InAnisotropy, const FQuat& InRotation);
 	void Setup(const UBlastFractureSettingsVoronoi& Other);
 };
 
@@ -399,14 +375,14 @@ UCLASS()
 class UBlastFractureSettingsRadial : public UBlastFractureSettingsVoronoi
 {
 	GENERATED_UCLASS_BODY()
-
+		
 	/** The center of generated pattern. */
 	UPROPERTY(EditAnywhere, Category = RadialFracture)
 	FBlastVector							Origin;
 
 	/** The normal to plane in which sites are generated. */
 	UPROPERTY(EditAnywhere, Category = RadialFracture)
-	FBlastVector							Normal = FBlastVector(EBlastViewportControlMode::Normal, FVector3f(0.f, 0.f, 1.f));
+	FBlastVector							Normal = FBlastVector(EBlastViewportControlMode::Normal, FVector(0.f, 0.f, 1.f));
 
 	/** The pattern radius. */
 	UPROPERTY(EditAnywhere, Category = RadialFracture, meta = (DefaultValue = "1", ClampMin = "0", UIMin = "0"))
@@ -419,7 +395,7 @@ class UBlastFractureSettingsRadial : public UBlastFractureSettingsVoronoi
 	/** The number of radial steps. */
 	UPROPERTY(EditAnywhere, Category = RadialFracture, meta = (DefaultValue = "2", ClampMin = "1", UIMin = "1"))
 	int32									RadialSteps;
-
+		
 	/** The angle offset at each radial step. */
 	UPROPERTY(EditAnywhere, Category = RadialFracture, meta = (ClampMin = "0", UIMin = "0", ClampMax = "1", UIMax = "1"))
 	float									AngleOffset;
@@ -469,7 +445,7 @@ UCLASS()
 class UBlastFractureSettingsUniformSlicing : public UBlastFractureSettingsNoise
 {
 	GENERATED_UCLASS_BODY()
-
+		
 	/** The number of slices along X, Y, Z axis. */
 	UPROPERTY(EditAnywhere, Category = UniformSlicingFracture)
 	FIntVector								SlicesCount; //TODO Min/Max check
@@ -489,7 +465,7 @@ class UBlastFractureSettingsCutout : public UBlastFractureSettingsNoise
 	GENERATED_UCLASS_BODY()
 
 	UPROPERTY(EditAnywhere, Category = CutoutFracture)
-	TObjectPtr<class UTexture2D> Pattern;
+	class UTexture2D*						Pattern;
 
 	/** The bitmap pattern transform. Note: Pattern is flate and scele to normal is not applied. */
 	//UPROPERTY(EditAnywhere, Category = CutoutFracture)
@@ -501,11 +477,11 @@ class UBlastFractureSettingsCutout : public UBlastFractureSettingsNoise
 
 	/** The normal to cutout plane */
 	UPROPERTY(EditAnywhere, Category = CutoutFracture)
-	FBlastVector							Normal = FBlastVector(EBlastViewportControlMode::Normal, FVector3f(0.f, 0.f, 1.f));
+	FBlastVector							Normal = FBlastVector(EBlastViewportControlMode::Normal, FVector(0.f, 0.f, 1.f));
 
 	/** The size of cutout plane. */
 	UPROPERTY(EditAnywhere, Category = CutoutFracture)
-	FVector2f								Size;
+	FVector2D								Size;
 
 	/** The rotation of cutout plane around normal in degree. */
 	UPROPERTY(EditAnywhere, Category = CutoutFracture)
@@ -535,7 +511,7 @@ class UBlastFractureSettingsCut : public UBlastFractureSettingsNoise
 
 	/** The normal to plane */
 	UPROPERTY(EditAnywhere, Category = CutFracture)
-	FBlastVector							Normal = FBlastVector(EBlastViewportControlMode::Normal, FVector3f(0.f, 0.f, 1.f));
+	FBlastVector							Normal = FBlastVector(EBlastViewportControlMode::Normal, FVector(0.f, 0.f, 1.f));
 };
 
 DECLARE_DELEGATE(FOnFractureMethodChanged);
@@ -563,7 +539,7 @@ public:
 	UPROPERTY(EditAnywhere, Category = General)
 	uint32									bReplaceFracturedChunk : 1;
 
-	/** If set fracture tool will produce new chunk for each unconnected convex
+	/** If set fracture tool will produce new chunk for each unconnected convex 
 		otherwise chunks which contains few unconnected convexes is possible.
 	*/
 	UPROPERTY(EditAnywhere, Category = General, meta = (DefaultValue = "1"))
@@ -584,7 +560,7 @@ public:
 	UPROPERTY(EditAnywhere, Category = General, meta = (InlineEditConditionToggle))
 	uint32									bDefaultSupportDepth : 1;
 
-	/** Fractured chunks will be support chunks if its depth the same as DefaultSupportDepth or
+	/** Fractured chunks will be support chunks if its depth the same as DefaultSupportDepth or 
 		if it has no children and its depth is less then DefaultSupportDepth. */
 	UPROPERTY(EditAnywhere, Category = General, meta = (EditCondition = "bDefaultSupportDepth"))
 	int32									DefaultSupportDepth;
@@ -601,7 +577,7 @@ public:
 
 	/** The material for internal faces of fractured chunks. External materials will be inherited from root chunk. */
 	UPROPERTY(EditAnywhere, Category = General)
-	TObjectPtr<UMaterialInterface> InteriorMaterial;
+	UMaterialInterface*						InteriorMaterial;
 
 	/** The existing slot to apply to the interior material. If none, then a new slot is created"*/
 	UPROPERTY(EditAnywhere, Category = General)
@@ -609,28 +585,28 @@ public:
 
 	//These need to be tagged to be seen by the GC
 	UPROPERTY(Instanced)
-	TObjectPtr<UBlastFractureSettingsVoronoiUniform>	VoronoiUniformFracture;
+	UBlastFractureSettingsVoronoiUniform*	VoronoiUniformFracture;
+	
+	UPROPERTY(Instanced)
+	UBlastFractureSettingsVoronoiClustered*	VoronoiClusteredFracture;
+	
+	UPROPERTY(Instanced)
+	UBlastFractureSettingsRadial*			RadialFracture;
 
 	UPROPERTY(Instanced)
-	TObjectPtr<UBlastFractureSettingsVoronoiClustered>	VoronoiClusteredFracture;
+	UBlastFractureSettingsInSphere*			InSphereFracture;
+	
+	UPROPERTY(Instanced)
+	UBlastFractureSettingsRemoveInSphere*	RemoveInSphere;
 
 	UPROPERTY(Instanced)
-	TObjectPtr<UBlastFractureSettingsRadial>			RadialFracture;
+	UBlastFractureSettingsUniformSlicing*	UniformSlicingFracture;
 
 	UPROPERTY(Instanced)
-	TObjectPtr<UBlastFractureSettingsInSphere>			InSphereFracture;
+	UBlastFractureSettingsCutout*			CutoutFracture;
 
 	UPROPERTY(Instanced)
-	TObjectPtr<UBlastFractureSettingsRemoveInSphere>	RemoveInSphere;
-
-	UPROPERTY(Instanced)
-	TObjectPtr<UBlastFractureSettingsUniformSlicing>	UniformSlicingFracture;
-
-	UPROPERTY(Instanced)
-	TObjectPtr<UBlastFractureSettingsCutout>			CutoutFracture;
-
-	UPROPERTY(Instanced)
-	TObjectPtr<UBlastFractureSettingsCut>				CutFracture;
+	UBlastFractureSettingsCut*				CutFracture;
 
 	/** APEX references materials by name, but we'll bypass that mechanism and use of UE materials instead. */
 	//UPROPERTY(EditFixedSize, Category = Material)
@@ -672,10 +648,10 @@ public:
 	uint32									VoronoiForceReset : 1;
 
 	UPROPERTY(config, meta = (ClampMin = "0.01", ClampMax = "1"))
-	FVector3f								VoronoiCellAnisotropy;
+	FVector									VoronoiCellAnisotropy;
 
 	UPROPERTY(config)
-	FQuat4f									VoronoiCellRotation;
+	FQuat									VoronoiCellRotation;
 
 	UPROPERTY(config, meta = (ClampMin = "2"))
 	int32									VoronoiUniformCellCount;
@@ -690,10 +666,10 @@ public:
 	float									VoronoiClusteredClusterRadius;
 
 	//UPROPERTY(config)
-	//FVector3f								RadialOrigin;
+	//FVector									RadialOrigin;
 
 	//UPROPERTY(config)
-	//FVector3f								RadialNormal;
+	//FVector									RadialNormal;
 
 	UPROPERTY(config, meta = (ClampMin = "0.01"))
 	float									RadialRadius;
@@ -712,7 +688,7 @@ public:
 
 	UPROPERTY(config, meta = (ClampMin = "2"))
 	int32									InSphereCellCount;
-
+	
 	UPROPERTY(config, meta = (ClampMin = "0.01"))
 	float									InSphereRadius;
 
@@ -732,7 +708,7 @@ public:
 	float									UniformSlicingOffsetVariation;
 
 	UPROPERTY(config)
-	FVector2f								CutoutSize;
+	FVector2D								CutoutSize;
 
 	UPROPERTY(config)
 	float									CutoutRotationZ;
@@ -756,7 +732,7 @@ public:
 	int32									NoiseOctaveNumber;
 
 	UPROPERTY(config, meta = (ClampMin = "0"))
-	FVector3f								NoiseSamplingInterval;
+	FVector									NoiseSamplingInterval;
 
 	UPROPERTY(config)
 	uint32									bReplaceFracturedChunk : 1;

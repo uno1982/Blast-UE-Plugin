@@ -80,7 +80,7 @@ TSharedRef< SWidget > SBlastChunkTreeItem::GenerateWidgetForColumn(const FName& 
 		TableRowContent =
 			SAssignNew(VisibilityButton, SButton)
 			.ContentPadding(0)
-			.ButtonStyle(FAppStyle::Get(), "NoBorder")
+			.ButtonStyle(FEditorStyle::Get(), "ToggleButton")
 			.IsEnabled(this, &SBlastChunkTreeItem::IsVisibilityEnabled)
 			.OnClicked(this, &SBlastChunkTreeItem::OnToggleVisibility)
 			.ToolTipText(LOCTEXT("VisibilityButtonToolTip", "Toggle Chunk Visibility"))
@@ -119,7 +119,7 @@ TSharedRef< SWidget > SBlastChunkTreeItem::GenerateWidgetForColumn(const FName& 
 			.AutoWidth()
 			[
 				SNew(STextBlock)
-				.Font((*ChunkEditorModel).bBold ? FAppStyle::GetFontStyle("BoldFont") : FAppStyle::GetFontStyle("NormalFont"))
+				.Font((*ChunkEditorModel).bBold ? FEditorStyle::GetFontStyle("BoldFont") : FEditorStyle::GetFontStyle("NormalFont"))
 				.Text(FText::FromName((*ChunkEditorModel).Name))
 			];
 	}
@@ -148,17 +148,17 @@ const FSlateBrush* SBlastChunkTreeItem::GetVisibilityBrush() const
 	{
 		if (ChunkEditorModel->bVisible)
 		{
-			return VisibilityButton->IsHovered() ? FAppStyle::GetBrush("Level.VisibleHighlightIcon16x") :
-				FAppStyle::GetBrush("Level.VisibleIcon16x");
+			return VisibilityButton->IsHovered() ? FEditorStyle::GetBrush("Level.VisibleHighlightIcon16x") :
+				FEditorStyle::GetBrush("Level.VisibleIcon16x");
 		}
 		else
 		{
-			return VisibilityButton->IsHovered() ? FAppStyle::GetBrush("Level.NotVisibleHighlightIcon16x") :
-				FAppStyle::GetBrush("Level.NotVisibleIcon16x");
+			return VisibilityButton->IsHovered() ? FEditorStyle::GetBrush("Level.NotVisibleHighlightIcon16x") :
+				FEditorStyle::GetBrush("Level.NotVisibleIcon16x");
 		}
 	}
 	
-	return FAppStyle::GetBrush("Level.EmptyIcon16x");
+	return FEditorStyle::GetBrush("Level.EmptyIcon16x");
 	
 }
 
@@ -190,7 +190,7 @@ const FSlateBrush* SBlastChunkTreeItem::GetChunkBrush() const
 		}
 	}
 
-	return FAppStyle::GetBrush("Level.EmptyIcon16x");
+	return FEditorStyle::GetBrush("Level.EmptyIcon16x");
 
 }
 
@@ -288,7 +288,7 @@ void SBlastChunkTree::Construct(const FArguments& InArgs, TWeakPtr <IBlastMeshEd
 					.FillWidth(1)
 					[
 						SNew(SButton)
-						.ButtonStyle(FAppStyle::Get(), "FlatButton.Dark")
+						.ButtonStyle(FEditorStyle::Get(), "FlatButton.Dark")
 						.OnClicked(this, &SBlastChunkTree::ApplySelectionFilter)
 						[
 							SNew(STextBlock)
@@ -301,7 +301,7 @@ void SBlastChunkTree::Construct(const FArguments& InArgs, TWeakPtr <IBlastMeshEd
 					.FillWidth(1)
 					[
 						SNew(SButton)
-						.ButtonStyle(FAppStyle::Get(), "FlatButton.Dark")
+						.ButtonStyle(FEditorStyle::Get(), "FlatButton.Dark")
 						.OnClicked(this, &SBlastChunkTree::ClearSelectionFilter)
 						[
 							SNew(STextBlock)

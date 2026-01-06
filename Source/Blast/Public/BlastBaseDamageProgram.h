@@ -4,16 +4,18 @@
 #include "Math/Vector.h"
 #include "WorldCollision.h"
 
-#include "BlastMaterial.h"
-
+struct NvBlastActor;
 struct FBodyInstance;
+struct FBlastMaterial;
 class UBlastMeshComponent;
 
 namespace Nv
 {
 namespace Blast
 {
+#if !BLAST_DISABLE_STRESS_SOLVER
 class ExtStressSolver;
+#endif
 }
 }
 
@@ -25,7 +27,7 @@ Implement your own on demand, look for examples of default ones like 'BlastRadia
 In order to apply it use UBlastMeshComponent's methods, it can be executed on particular UBlastMeshComponent
 or by overlapping area and applying it on all UBlastMeshComponent touched (@see UBlastMeshComponent::ApplyDamageProgramOverlapAll).
 */
-struct BLAST_API FBlastBaseDamageProgram
+struct FBlastBaseDamageProgram
 {
 public:
 	virtual ~FBlastBaseDamageProgram() = default;
@@ -45,11 +47,11 @@ public:
 	*/
 	struct FInput
 	{
-		FVector3f					worldOrigin;
-		FQuat4f						worldRot;
+		FVector						worldOrigin;
+		FQuat						worldRot;
 
-		FVector3f					localOrigin;
-		FQuat4f						localRot;
+		FVector						localOrigin;
+		FQuat						localRot;
 
 		const FBlastMaterial*		material;
 	};
@@ -67,7 +69,9 @@ public:
 
 	/return 'true' iff force or impulse was added to stress solver.
 	*/
+#if !BLAST_DISABLE_STRESS_SOLVER
 	virtual bool ExecuteStress(Nv::Blast::ExtStressSolver& StressSolver, uint32 actorIndex, FBodyInstance* actorBody, const FInput& input, UBlastMeshComponent& owner) const { return false; }
+#endif
 
 	/**
 	Called if damage was applied on actor (Execute call returned 'true') and split is about to be called.

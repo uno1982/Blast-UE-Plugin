@@ -1,10 +1,6 @@
-// Copyright 1998-2017 Epic Games, Inc. All Rights Reserved.
-
 #include "ViewportBlastMeshComponent.h"
-
 #include "Math/UnrealMathUtility.h"
 #include "PhysicsEngine/PhysicsAsset.h"
-#include "PhysicsEngine/SkeletalBodySetup.h"
 
 UViewportBlastMeshComponent::UViewportBlastMeshComponent(const FObjectInitializer& ObjectInitializer):
 	Super(ObjectInitializer)	
@@ -119,7 +115,7 @@ FBox UViewportBlastMeshComponent::GetChunkWorldBounds(int32 ChunkIndex) const
 		int32 BodyIndex = BlastMesh->PhysicsAsset->FindBodyIndex(ChunkBone);
 		if (ChunkBone != NAME_None && BlastMesh->PhysicsAsset->SkeletalBodySetups.IsValidIndex(BodyIndex))
 		{
-			const USkeletalBodySetup* BodySetup = BlastMesh->PhysicsAsset->SkeletalBodySetups[BodyIndex];
+			const UBodySetup* BodySetup = BlastMesh->PhysicsAsset->SkeletalBodySetups[BodyIndex];
 			if (BodySetup != nullptr)
 			{
 				int32 BoneIndex = BlastMesh->ChunkIndexToBoneIndex[ChunkIndex];

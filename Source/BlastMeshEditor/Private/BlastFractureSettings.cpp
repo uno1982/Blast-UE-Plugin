@@ -108,7 +108,7 @@ void FBlastVectorCustomization::CustomizeHeader(TSharedRef<class IPropertyHandle
 
 	HeaderRow.NameContent()
 		[
-			StructPropertyHandle->CreatePropertyNameWidget(StructPropertyHandle->GetProperty()->GetDisplayNameText(), StructPropertyHandle->GetProperty()->GetToolTipText())
+			StructPropertyHandle->CreatePropertyNameWidget(StructPropertyHandle->GetProperty()->GetDisplayNameText(), StructPropertyHandle->GetProperty()->GetToolTipText(), true)
 		]
 		.ValueContent()
 		.MinDesiredWidth(500)
@@ -120,6 +120,7 @@ void FBlastVectorCustomization::CustomizeHeader(TSharedRef<class IPropertyHandle
 			[
 				SNew(SVectorInputBox)
 				.bColorAxisLabels(true)
+				.AllowResponsiveLayout(true)
 				.AllowSpin(false)
 				.X(this, &FBlastVectorCustomization::OnGetValue, 0)
 				.Y(this, &FBlastVectorCustomization::OnGetValue, 1)
@@ -207,40 +208,12 @@ UBlastRebuildCollisionMeshProperties::UBlastRebuildCollisionMeshProperties(const
 }
 
 //////////////////////////////////////////////////////////////////////////
-// UBlastStaticMeshCopyCollisionProperties
-//////////////////////////////////////////////////////////////////////////
-
-UBlastStaticMeshCopyCollisionProperties::UBlastStaticMeshCopyCollisionProperties(const FObjectInitializer& ObjectInitializer)
-	: Super(ObjectInitializer)
-{
-}
-
-//////////////////////////////////////////////////////////////////////////
-// UBlastImportSettings
-//////////////////////////////////////////////////////////////////////////
-
-UBlastImportSettings::UBlastImportSettings(const FObjectInitializer& ObjectInitializer)
-	: Super(ObjectInitializer)
-{
-}
-
-//////////////////////////////////////////////////////////////////////////
 // UBlastStaticMeshHolder
 //////////////////////////////////////////////////////////////////////////
 
 UBlastStaticMeshHolder::UBlastStaticMeshHolder(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
-}
-
-void UBlastStaticMeshCopyCollisionProperties::PostEditChangeProperty(FPropertyChangedEvent& e)
-{
-	Super::PostEditChangeProperty(e);
-	FName PropertyName = (e.Property != NULL) ? e.Property->GetFName() : NAME_None;
-	if (PropertyName == GET_MEMBER_NAME_CHECKED(UBlastStaticMeshCopyCollisionProperties, StaticMesh) && StaticMesh != nullptr)
-	{
-		OnStaticMeshSelected.ExecuteIfBound();
-	}
 }
 
 void UBlastStaticMeshHolder::PostEditChangeProperty(struct FPropertyChangedEvent& e)
@@ -260,8 +233,8 @@ void UBlastStaticMeshHolder::PostEditChangeProperty(struct FPropertyChangedEvent
 
 /*void FFractureMaterial::FillNxFractureMaterialDesc(apex::FractureMaterialDesc& PFractureMaterialDesc)
 {
-	PFractureMaterialDesc.uvScale = NvcVec2(UVScale.X, UVScale.Y);
-	PFractureMaterialDesc.uvOffset = NvcVec2(UVOffset.X, UVOffset.Y);
+	PFractureMaterialDesc.uvScale = PxVec2(UVScale.X, UVScale.Y);
+	PFractureMaterialDesc.uvOffset = PxVec2(UVOffset.X, UVOffset.Y);
 	PFractureMaterialDesc.tangent = U2PVector(Tangent);
 	PFractureMaterialDesc.uAngle = UAngle;
 	PFractureMaterialDesc.interiorSubmeshIndex = InteriorElementIndex >= 0 ? (PxU32)InteriorElementIndex : 0xFFFFFFFF;	// We'll use this value to indicate we should create a new element
@@ -456,7 +429,7 @@ void FBlastFractureSettingsComponentDetails::CustomizeDetails(IDetailLayoutBuild
 					[
 						SNew(SButton)
 						.ToolTipText(ToolTip)
-						.ButtonStyle(FAppStyle::Get(), "FlatButton.Dark")
+						.ButtonStyle(FEditorStyle::Get(), "FlatButton.Dark")
 						.OnClicked(FOnClicked::CreateStatic(&FBlastFractureSettingsComponentDetails::ExecuteToolCommand, &DetailBuilder, Function))
 						[	
 							SNew(STextBlock)
@@ -478,7 +451,7 @@ UBlastFractureSettingsNoise::UBlastFractureSettingsNoise(const FObjectInitialize
 {
 }
 
-void UBlastFractureSettingsNoise::Setup(float InAmplitude, float InFrequency, int32 InOctaveNumber, FVector3f InSamplingInterval)
+void UBlastFractureSettingsNoise::Setup(float InAmplitude, float InFrequency, int32 InOctaveNumber, FVector InSamplingInterval)
 {
 	Amplitude = InAmplitude;
 	Frequency = InFrequency;
@@ -496,7 +469,7 @@ UBlastFractureSettingsVoronoi::UBlastFractureSettingsVoronoi(const FObjectInitia
 {
 }
 
-void UBlastFractureSettingsVoronoi::Setup(bool InForceReset, const FVector3f& InAnisotropy, const FQuat4f& InRotation)
+void UBlastFractureSettingsVoronoi::Setup(bool InForceReset, const FVector& InAnisotropy, const FQuat& InRotation)
 {
 	ForceReset = InForceReset;
 	CellAnisotropy = InAnisotropy;
@@ -708,14 +681,14 @@ void UBlastFractureSettings::PostEditChangeProperty(struct FPropertyChangedEvent
 UBlastFractureSettingsConfig::UBlastFractureSettingsConfig(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
-	VoronoiCellAnisotropy = FVector3f(1.f);
-	VoronoiCellRotation = FQuat4f::Identity;
+	VoronoiCellAnisotropy = FVector(1.f);
+	VoronoiCellRotation = FQuat::Identity;
 	VoronoiUniformCellCount = 10;
 	VoronoiClusteredCellCount = 10;
 	VoronoiClusteredClusterCount = 5;
 	VoronoiClusteredClusterRadius = 100.f;
-	//RadialOrigin = FVector3f(0.f);
-	//RadialNormal = FVector3f(0.f, 0.f, 1.f);
+	//RadialOrigin = FVector(0.f);
+	//RadialNormal = FVector(0.f, 0.f, 1.f);
 	RadialRadius = 100.f;
 	RadialAngularSteps = 6;
 	RadialRadialSteps = 5;
@@ -728,7 +701,7 @@ UBlastFractureSettingsConfig::UBlastFractureSettingsConfig(const FObjectInitiali
 	UniformSlicingSlicesCount = FIntVector(2, 2, 2);
 	UniformSlicingAngleVariation = 0.f;
 	UniformSlicingOffsetVariation = 0.f;
-	CutoutSize = FVector2f(100, 100);
+	CutoutSize = FVector2D(100, 100);
 	CutoutRotationZ = 0.f;
 	CutoutAperture = 0.f;
 	bCutoutPeriodic = false;
@@ -736,7 +709,7 @@ UBlastFractureSettingsConfig::UBlastFractureSettingsConfig(const FObjectInitiali
 	NoiseAmplitude = 0.f;
 	NoiseFrequency = 1.f;
 	NoiseOctaveNumber = 1;
-	NoiseSamplingInterval = FVector3f(100.f);
+	NoiseSamplingInterval = FVector(100.f);
 	RandomSeed = -1;
 	DefaultSupportDepth = -1;
 	bRemoveIslands = true;

@@ -18,10 +18,10 @@ public:
 	bool bIsDirty;
 
 	UPROPERTY()
-	TArray<TObjectPtr<class ABlastGlueVolume>> GlueVolumes;
+	TArray<class ABlastGlueVolume*> GlueVolumes;
 
 	UPROPERTY()
-	TArray<TObjectPtr<class ABlastExtendedSupportStructure>> SupportStructures;
+	TArray<class ABlastExtendedSupportStructure*> SupportStructures;
 #endif
 
 #if WITH_EDITOR
@@ -70,7 +70,7 @@ public:
 
 #if WITH_EDITORONLY_DATA
 	UPROPERTY()
-	TObjectPtr<UArrowComponent> GlueVectorComponent;
+	UArrowComponent* GlueVectorComponent;
 
 	//These are used to invalidate the components after we are edited
 	UPROPERTY(DuplicateTransient)

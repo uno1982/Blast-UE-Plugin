@@ -4,7 +4,9 @@
 #include "Components/SceneComponent.h"
 #include "BlastBaseDamageComponent.generated.h"
 
+struct NvBlastActor;
 struct FBodyInstance;
+struct NvBlastExtMaterial;
 struct FBlastBaseDamageProgram;
 
 

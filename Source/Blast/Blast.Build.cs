@@ -1,6 +1,6 @@
 using System;
 using System.IO;
-using EpicGames.Core;
+using Tools.DotNETCommon;
 
 namespace UnrealBuildTool.Rules
 {
@@ -8,93 +8,131 @@ namespace UnrealBuildTool.Rules
     {
         public static string GetBlastLibraryFolderName(ModuleRules Rules)
         {
-            if (Rules.Target.Configuration == UnrealTargetConfiguration.Debug)
+            switch (Rules.Target.Configuration)
             {
-                return "debug";
-            }
-            else
-            {
-                return "release";
+                case UnrealTargetConfiguration.Debug:
+                    if (Rules.Target.Configuration == UnrealTargetConfiguration.Debug)
+                    {
+                        return "debug";
+                    }
+                    else
+                    {
+                        return "checked";
+                    }
+                case UnrealTargetConfiguration.Shipping:
+                    return "release";
+                case UnrealTargetConfiguration.Test:
+                    return "profile";
+                case UnrealTargetConfiguration.Development:
+                case UnrealTargetConfiguration.DebugGame:
+                case UnrealTargetConfiguration.Unknown:
+                default:
+                    if (Rules.Target.bUseShippingPhysXLibraries)
+                    {
+                        return "release";
+                    }
+                    else if (Rules.Target.bUseCheckedPhysXLibraries)
+                    {
+                        return "checked";
+                    }
+                    else
+                    {
+                        return "profile";
+                    }
             }
         }
 
-        public static void SetupModuleBlastSupport(ModuleRules Rules, string[] BlastLibs)
+        public static void SetupModuleBlastSupport(ModuleRules Rules, string[] BlastLibs,
+ string[] AndroidBlastLibs = null)
         {
             string LibFolderName = GetBlastLibraryFolderName(Rules);
+            bool bIsAndroid = Rules.Target.Platform == UnrealTargetPlatform.Android;
+            
+            // Only set BLAST_DISABLE_STRESS_SOLVER once here
+            if (bIsAndroid)
+            {
+                Rules.PublicDefinitions.Add("BLAST_DISABLE_STRESS_SOLVER=1");
+            }
+            else
+            {
+                Rules.PublicDefinitions.Add("BLAST_DISABLE_STRESS_SOLVER=0");
+            }
+            
+            Rules.PublicDefinitions.Add(string.Format("BLAST_LIB_CONFIG_STRING=\"{0}\"",
+LibFolderName));
 
-            Rules.PublicDefinitions.Add(string.Format("BLAST_LIB_CONFIG_STRING=\"{0}\"", LibFolderName));
-
-            const bool bUsePhysX = false;
-            Rules.PublicDefinitions.Add(string.Format("BLAST_USE_PHYSX={0}", bUsePhysX ? 1 : 0));
-
-            //Go up two from Source/Blast
+            // Go up two from Source/Blast to get plugin root
             DirectoryReference ModuleRootFolder = (new DirectoryReference(Rules.ModuleDirectory)).ParentDirectory.ParentDirectory;
-            DirectoryReference EngineDirectory = new DirectoryReference(Path.GetFullPath(Rules.Target.RelativeEnginePath));
-            string BLASTLibDir = Path.Combine("$(EngineDir)", ModuleRootFolder.MakeRelativeTo(EngineDirectory), "Libraries", Rules.Target.Platform.ToString(), LibFolderName);
-
             string DLLSuffix = "";
             string DLLPrefix = "";
             string LibSuffix = "";
+            string BLASTLibDir;
 
-            // Libraries and DLLs for windows platform
+            // Use absolute path for all platforms - works in both Engine/Plugins and Project/Plugins
             if (Rules.Target.Platform == UnrealTargetPlatform.Win64)
             {
-                DLLSuffix = ".dll";
-                LibSuffix = ".lib";
+                DLLSuffix = "_x64.dll";
+                LibSuffix = "_x64.lib";
+                BLASTLibDir = Path.Combine(ModuleRootFolder.FullName, "Libraries", "Win64", LibFolderName);
+            }
+            else if (Rules.Target.Platform == UnrealTargetPlatform.Win32)
+            {
+                DLLSuffix = "_x86.dll";
+                LibSuffix = "_x86.lib";
+                BLASTLibDir = Path.Combine(ModuleRootFolder.FullName, "Libraries", "Win32", LibFolderName);
             }
             else if (Rules.Target.Platform == UnrealTargetPlatform.Linux)
             {
                 DLLPrefix = "lib";
                 DLLSuffix = ".so";
                 LibSuffix = ".so";
+                BLASTLibDir = Path.Combine(ModuleRootFolder.FullName, "Libraries", "Linux", LibFolderName);
             }
-            else if (Rules.Target.Platform == UnrealTargetPlatform.Android)
+            else if (bIsAndroid)
             {
-                // Android uses static libraries (.a)
                 DLLPrefix = "lib";
-                DLLSuffix = "";  // No DLL loading on Android
+                DLLSuffix = ".a";
                 LibSuffix = ".a";
+                BLASTLibDir = Path.Combine(ModuleRootFolder.FullName, "Libraries", "Android", LibFolderName);
+            }
+            else
+            {
+                BLASTLibDir = Path.Combine(ModuleRootFolder.FullName, "Libraries", Rules.Target.Platform.ToString(), LibFolderName);
             }
 
             Rules.PublicDefinitions.Add(string.Format("BLAST_LIB_DLL_SUFFIX=\"{0}\"", DLLSuffix));
             Rules.PublicDefinitions.Add(string.Format("BLAST_LIB_DLL_PREFIX=\"{0}\"", DLLPrefix));
 
-            foreach (string Lib in BlastLibs)
+            // Use Android-specific libs if provided and on Android platform
+            string[] LibsToUse = (bIsAndroid && AndroidBlastLibs != null) ? AndroidBlastLibs : BlastLibs;
+
+            foreach (string Lib in LibsToUse)
             {
-                Rules.PublicAdditionalLibraries.Add(Path.Combine(BLASTLibDir, String.Format("{0}{1}{2}", DLLPrefix, Lib, LibSuffix)));
-                
-                // Android uses static libraries, no DLL loading needed
-                if (Rules.Target.Platform != UnrealTargetPlatform.Android)
+                string LibPath = Path.Combine(BLASTLibDir, String.Format("{0}{1}{2}", DLLPrefix, Lib, LibSuffix));
+                Rules.PublicAdditionalLibraries.Add(LibPath);
+
+                if (!bIsAndroid) // Android uses static libs, no DLLs to load
                 {
                     var DllName = String.Format("{0}{1}{2}", DLLPrefix, Lib, DLLSuffix);
                     Rules.PublicDelayLoadDLLs.Add(DllName);
                     Rules.RuntimeDependencies.Add(Path.Combine(BLASTLibDir, DllName));
                 }
             }
-
-            if (bUsePhysX)
-            {
-            }
-            else
-            {
-                Rules.PrivateDependencyModuleNames.Add("Chaos");
-            }
-            
-            //It's useful to periodically turn this on since the order of appending files in unity build is random.
-            //The use of types without the right header can creep in and cause random build failures
-
-            //Rules.bFasterWithoutUnity = true;
         }
 
         public Blast(ReadOnlyTargetRules Target) : base(Target)
         {
             OptimizeCode = CodeOptimization.InNonDebugBuilds;
 
-            // Android uses Cap'n Proto in LITE mode
-            if (Target.Platform == UnrealTargetPlatform.Android)
-            {
-                PublicDefinitions.Add("CAPNP_LITE=1");
-            }
+            PublicIncludePaths.AddRange(
+                new string[] {
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "Public/extensions/serialization/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "Public/extensions/shaders/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "Public/extensions/stress/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "Public/globals/include/")),
+                    Path.GetFullPath(Path.Combine(ModuleDirectory, "Public/lowlevel/include/")),
+                }
+            );
 
             PrivateDependencyModuleNames.AddRange(
                 new string[]
@@ -105,8 +143,7 @@ namespace UnrealBuildTool.Rules
                     "RenderCore",
                     "Renderer",
                     "RHI",
-                    "BlastLoader",
-                    "PhysicsCore"
+                    "BlastLoader"
                 }
             );
 
@@ -117,7 +154,7 @@ namespace UnrealBuildTool.Rules
                   {
                         "RawMesh",
                         "UnrealEd",
-                        "BlastLoaderEditor"
+                        "BlastLoaderEditor",
                   }
                 );
             }
@@ -125,51 +162,45 @@ namespace UnrealBuildTool.Rules
             PublicDependencyModuleNames.AddRange(
                 new string[]
                 {
-                    "Engine"
+                    "Engine",
+                    "PhysX",
                 }
             );
 
-            string[] BlastLibs;
-            
-            // Android: Include core Blast libraries + serialization with Cap'n Proto
-            // Note: Stress extension skipped (needs SSE->NEON port)
-            // Note: PhysX serialization DTOs excluded (core serialization works)
-            if (Target.Platform == UnrealTargetPlatform.Android)
+            // Windows/Linux libs (includes stress solver)
+            string[] BlastLibs =
             {
-                BlastLibs = new string[]
-                {
-                     "NvBlast",
-                     "NvBlastGlobals",
-                     "NvBlastExtSerialization",
-                     "NvBlastExtShaders",
-                     // Cap'n Proto libraries required for serialization
-                     "capnp",
-                     "kj",
-                };
-            }
-            else
+                 "NvBlast",
+                 "NvBlastGlobals",
+                 "NvBlastExtSerialization",
+                 "NvBlastExtShaders",
+                 "NvBlastExtStress",
+            };
+
+            // Android libs (stress solver uses SSE intrinsics, not available on ARM)
+            string[] AndroidBlastLibs =
             {
-                BlastLibs = new string[]
-                {
-                     "NvBlast",
-                     "NvBlastGlobals",
-                     "NvBlastExtSerialization",
-                     "NvBlastExtShaders",
-                     "NvBlastExtStress",
-                };
-            }
+                 "NvBlast",
+                 "NvBlastGlobals",
+                 "NvBlastExtSerialization",
+                 "NvBlastExtShaders",
+            };
 
             PrivateIncludePaths.AddRange(
                 new string[]
                 {
-	                Path.GetFullPath(Path.Combine(PluginDirectory, "Libraries", "include")),
-	                Path.GetFullPath(Path.Combine(PluginDirectory, "Libraries", "include", "blast-sdk", "lowlevel")),
-	                Path.GetFullPath(Path.Combine(PluginDirectory, "Libraries", "include", "blast-sdk", "globals")),
-	                Path.GetFullPath(Path.Combine(PluginDirectory, "Libraries", "include", "blast-sdk", "shared", "NvFoundation"))
+                    "Blast/Public/extensions/assetutils/include",
+                    "Blast/Public/extensions/authoring/include",
+                    "Blast/Public/extensions/authoringCommon/include",
+                    "Blast/Public/extensions/serialization/include",
+                    "Blast/Public/extensions/shaders/include",
+                    "Blast/Public/extensions/stress/include",
+                    "Blast/Public/globals/include",
+                    "Blast/Public/lowlevel/include"
                 }
             );
 
-            SetupModuleBlastSupport(this, BlastLibs);
+            SetupModuleBlastSupport(this, BlastLibs, AndroidBlastLibs);
 
             SetupModulePhysicsSupport(Target);
         }

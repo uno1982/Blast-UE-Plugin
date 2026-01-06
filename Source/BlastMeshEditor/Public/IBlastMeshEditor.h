@@ -35,7 +35,7 @@ public:
 	bool bSupport;
 	bool bStatic;
 	int32 ChunkIndex;
-	TArray<FVector3f> VoronoiSites;
+	TSharedPtr<TArray<FVector>> VoronoiSites;
 	FBlastChunkEditorModelPtr Parent;
 };
 

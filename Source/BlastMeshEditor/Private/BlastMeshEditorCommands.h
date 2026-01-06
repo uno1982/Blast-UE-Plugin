@@ -23,11 +23,9 @@ public:
 	TSharedPtr< FUICommandInfo > FixChunkHierarchy;
 	//TSharedPtr< FUICommandInfo > Refresh;
 	TSharedPtr< FUICommandInfo > ImportRootFromStaticMesh;
-	TSharedPtr< FUICommandInfo > ImportRootFromFbx;
 	TSharedPtr< FUICommandInfo > FitUvCoordinates;
 	TSharedPtr< FUICommandInfo > ChunksFromIslands;
 	TSharedPtr< FUICommandInfo > RebuildCollisionMesh;
-	TSharedPtr< FUICommandInfo > CopyCollisionMeshToChunk;
 	
 	TSharedPtr< FUICommandInfo > ToggleFractureVisualization;
 	TSharedPtr< FUICommandInfo > ToggleAABBView;

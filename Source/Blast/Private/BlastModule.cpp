@@ -5,12 +5,12 @@
 #include "Logging/LogVerbosity.h"
 #include "Modules/ModuleManager.h"
 
-class BlastAllocatorCallback final : public nvidia::NvAllocatorCallback
+class BlastAllocatorCallback final : public Nv::Blast::AllocatorCallback
 {
 	virtual void* allocate(size_t size, const char* typeName, const char* filename, int line)
 	{
-		void* ptr = FMemory::Malloc(size, 0x10);
-		check((reinterpret_cast<size_t>(ptr) & 0x0F) == 0);
+		void* ptr = FMemory::Malloc(size, 16);
+		check((reinterpret_cast<size_t>(ptr) & 15) == 0);
 		return ptr;
 
 	}
@@ -23,33 +23,24 @@ class BlastAllocatorCallback final : public nvidia::NvAllocatorCallback
 
 static BlastAllocatorCallback g_blastAllocatorCallback;
 
-class BlastErrorCallback final : public nvidia::NvErrorCallback
+class BlastErrorCallback final : public Nv::Blast::ErrorCallback
 {
-	virtual void reportError(nvidia::NvErrorCode::Enum code, const char* message, const char* file, int line)
+	virtual void reportError(Nv::Blast::ErrorCode::Enum code, const char* message, const char* file, int line)
 	{
 #if !NO_LOGGING
 		ELogVerbosity::Type verbosity;
 		switch (code)
 		{
-		case nvidia::NvErrorCode::eABORT:
-			verbosity = ELogVerbosity::Fatal;
-			break;
-		case nvidia::NvErrorCode::eOUT_OF_MEMORY:
-		case nvidia::NvErrorCode::eINTERNAL_ERROR:
+		case Nv::Blast::ErrorCode::eINVALID_OPERATION:
 			verbosity = ELogVerbosity::Error;
 			break;
-		case nvidia::NvErrorCode::eINVALID_PARAMETER:
-		case nvidia::NvErrorCode::eINVALID_OPERATION:
-			verbosity = ELogVerbosity::Error;
-			break;
-		case nvidia::NvErrorCode::ePERF_WARNING:
-		case nvidia::NvErrorCode::eDEBUG_WARNING:
+		case Nv::Blast::ErrorCode::eDEBUG_WARNING:
 			verbosity = ELogVerbosity::Warning;
 			break;
-		case nvidia::NvErrorCode::eDEBUG_INFO:
+		case Nv::Blast::ErrorCode::eDEBUG_INFO:
 			verbosity = ELogVerbosity::Log;
 			break;
-		case nvidia::NvErrorCode::eNO_ERROR:
+		case Nv::Blast::ErrorCode::eNO_ERROR:
 			verbosity = ELogVerbosity::Log;
 			break;
 		default:

@@ -14,17 +14,7 @@
 bool UBlastMeshThumbnailRenderer::CanVisualizeAsset(UObject* Object)
 {
 	//Don't try with UBlastMeshExtendedSupport since there is no render data
-	if (!Object->IsA<UBlastMeshExtendedSupport>())
-	{
-		return false;
-	}
-	//Timing issue during import/build
-	UBlastMesh* BlastMesh = Cast<UBlastMesh>(Object);
-	if (!BlastMesh->Mesh->GetResourceForRendering())
-	{
-		return false;
-	}
-	return true;
+	return !Object->IsA<UBlastMeshExtendedSupport>();
 }
 
 void UBlastMeshThumbnailRenderer::Draw(UObject* Object, int32 X, int32 Y, uint32 Width, uint32 Height, FRenderTarget* Viewport, FCanvas* Canvas, bool bAdditionalViewFamily)
@@ -40,7 +30,7 @@ void UBlastMeshThumbnailRenderer::Draw(UObject* Object, int32 X, int32 Y, uint32
 
 		ThumbnailScene->SetBlastMesh(BlastMesh);
 		FSceneViewFamilyContext ViewFamily(FSceneViewFamily::ConstructionValues(Viewport, ThumbnailScene->GetScene(), FEngineShowFlags(ESFIM_Game))
-			.SetTime(FGameTime::CreateUndilated(FApp::GetCurrentTime() - GStartTime, FApp::GetDeltaTime())));
+			.SetWorldTimes(FApp::GetCurrentTime() - GStartTime, FApp::GetDeltaTime(), FApp::GetCurrentTime() - GStartTime));
 
 		ViewFamily.EngineShowFlags.DisableAdvancedFeatures();
 		ViewFamily.EngineShowFlags.MotionBlur = 0;
@@ -49,7 +39,8 @@ void UBlastMeshThumbnailRenderer::Draw(UObject* Object, int32 X, int32 Y, uint32
 		ViewFamily.SetScreenPercentageInterface(new FLegacyScreenPercentageDriver(
 			ViewFamily, /* GlobalResolutionFraction = */ 1.0f, /* AllowPostProcessSettingsScreenPercentage = */ false));
 
-		RenderViewFamily(Canvas, &ViewFamily, ThumbnailScene->CreateView(&ViewFamily, X, Y, Width, Height));
+		ThumbnailScene->GetView(&ViewFamily, X, Y, Width, Height);
+		GetRendererModule().BeginRenderingViewFamily(Canvas, &ViewFamily);
 		ThumbnailScene->SetBlastMesh(nullptr);
 	}
 }

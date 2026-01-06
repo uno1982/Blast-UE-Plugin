@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 
-#include "ThumbnailHelpers.h"
+#include "UnrealEd/Public/ThumbnailHelpers.h"
 #include "ThumbnailRendering/DefaultSizedThumbnailRenderer.h"
 
 #include "BlastMeshThumbnailRenderer.generated.h"
@@ -24,7 +24,7 @@ protected:
 	virtual void GetViewMatrixParameters(const float InFOVDegrees, FVector& OutOrigin, float& OutOrbitPitch, float& OutOrbitYaw, float& OutOrbitZoom) const override;
 
 private:
-	TObjectPtr<class UBlastMeshComponent> PreviewComponent;
+	class UBlastMeshComponent* PreviewComponent;
 };
 
 UCLASS(MinimalAPI)

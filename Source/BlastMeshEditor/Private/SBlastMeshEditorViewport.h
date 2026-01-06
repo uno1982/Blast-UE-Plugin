@@ -34,7 +34,6 @@ public:
 	
 	// FGCObject interface
 	virtual void AddReferencedObjects( FReferenceCollector& Collector ) override;
-	virtual FString GetReferencerName() const override;
 	// End of FGCObject interface
 
 	// FNotifyHook interface
@@ -55,10 +54,10 @@ public:
 	bool IsBlastVectorModeSelectable(EBlastViewportControlMode Mode) const;
 
 	/** Component for the preview Blast mesh. */
-	TObjectPtr<class UViewportBlastMeshComponent> PreviewComponent;
+	class UViewportBlastMeshComponent* PreviewComponent;
 
 	/** The parent tab where this viewport resides */
-	TWeakPtr<SDockTab> ParentTab;
+	TWeakPtr<SDockableTab> ParentTab;
 
 	/** 
 	 *	The explode amount (distance relative to the original mesh size to expand out the displayed chunks).  Clamped from below at zero.
@@ -126,7 +125,7 @@ private:
 	EViewModeIndex CurrentViewMode;
 
 	/** The mesh currently under consideration */
-	TObjectPtr<UBlastMesh> BlastMesh;
+	UBlastMesh* BlastMesh;
 
 	/** The explode amount (distance relative to the original mesh size to expand out the displayed chunks).  This should be positive. */
 	float ExplodeAmount;

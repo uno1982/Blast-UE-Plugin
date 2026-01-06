@@ -1,12 +1,8 @@
 #include "BlastRadialDamageComponent.h"
-
+#include "NvBlastExtDamageShaders.h"
 #include "BlastMeshComponent.h"
 
-#include "blast-sdk/extensions/shaders/NvBlastExtDamageShaders.h"
-
 #include "GameFramework/Actor.h"
-
-#include UE_INLINE_GENERATED_CPP_BY_NAME(BlastRadialDamageComponent)
 
 
 UBlastRadialDamageComponent::UBlastRadialDamageComponent(const FObjectInitializer& ObjectInitializer):

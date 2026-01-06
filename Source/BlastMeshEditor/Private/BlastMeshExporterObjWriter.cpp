@@ -34,6 +34,7 @@
 #include "Misc/FileHelper.h"
 
 #include <algorithm>
+#include <PxVec3.h>
 #include <sstream>
 #include "Containers/StringConv.h"
 
@@ -46,7 +47,7 @@ void ObjFileWriter::release()
 	delete this;
 }
 
-void ObjFileWriter::setInteriorIndex(int32 index)
+void ObjFileWriter::setInteriorIndex(int32_t index)
 {
 	mIntSurfaceMatIndex = index;
 }
@@ -58,26 +59,39 @@ bool CompByMaterial(const Triangle& a, const Triangle& b)
 
 bool ObjFileWriter::appendMesh(const AuthoringResult& aResult, const char* /*assetName*/, bool /*nonSkinned*/)
 {
-	mMeshData = MakeShared<ExporterMeshData>();
+	mMeshData = std::shared_ptr<ExporterMeshData>(new ExporterMeshData(), [](ExporterMeshData* md)
+	{
+		//delete[] md->hulls;
+		//delete[] md->hullsOffsets;
+		delete[] md->normals;
+		//delete[] md->normIndex;
+		delete[] md->posIndex;
+		delete[] md->positions;
+		delete[] md->submeshOffsets;
+		//delete[] md->texIndex;
+		delete[] md->submeshMats;
+		delete[] md->uvs;
+		delete md;
+	});
 		
-	ExporterMeshData& md = *mMeshData;
-	uint32 triCount = aResult.geometryOffset[aResult.chunkCount];
+	ExporterMeshData& md = *mMeshData.get();
+	uint32_t triCount = aResult.geometryOffset[aResult.chunkCount];
 	md.meshCount = aResult.chunkCount;
 	md.submeshCount = aResult.materialCount;
 	
-	int32 additionalMats = 0;
+	int32_t additionalMats = 0;
 
-	if (mIntSurfaceMatIndex == -1 || mIntSurfaceMatIndex >= (int32)md.submeshCount)
+	if (mIntSurfaceMatIndex == -1 || mIntSurfaceMatIndex >= (int32_t)md.submeshCount)
 	{
 		md.submeshCount += 1;
 		mIntSurfaceMatIndex = md.submeshCount - 1;
 		additionalMats = 1;
 	}
 
-	md.submeshOffsets = new uint32[md.meshCount * md.submeshCount + 1];
+	md.submeshOffsets = new uint32_t[md.meshCount * md.submeshCount + 1];
 	md.submeshMats = new Material[md.submeshCount];
 
-	for (uint32 i = 0; i < md.submeshCount - additionalMats; ++i)
+	for (uint32_t i = 0; i < md.submeshCount - additionalMats; ++i)
 	{
 		md.submeshMats[i].name = aResult.materialNames[i];
 		md.submeshMats[i].diffuse_tex = nullptr;
@@ -85,7 +99,7 @@ bool ObjFileWriter::appendMesh(const AuthoringResult& aResult, const char* /*ass
 
 	if (additionalMats)
 	{
-		md.submeshMats[mIntSurfaceMatIndex].name = TCHAR_TO_ANSI(*interiorNameStr);
+		md.submeshMats[mIntSurfaceMatIndex].name = interiorNameStr.c_str();
 		md.submeshMats[mIntSurfaceMatIndex].diffuse_tex = nullptr;
 	}
 	md.positionsCount = triCount * 3;
@@ -95,7 +109,7 @@ bool ObjFileWriter::appendMesh(const AuthoringResult& aResult, const char* /*ass
 	md.normals = new NvcVec3[md.normalsCount];
 	md.uvs = new NvcVec2[md.uvsCount];
 
-	md.posIndex = new uint32[triCount * 3];
+	md.posIndex = new uint32_t[triCount * 3];
 	md.normIndex = md.posIndex;
 	md.texIndex = md.posIndex;
 
@@ -108,25 +122,25 @@ bool ObjFileWriter::appendMesh(const AuthoringResult& aResult, const char* /*ass
 	sorted.reserve(triCount);
 
 
-	int32 perChunkOffset = 0;
-	for (uint32 i = 0; i < md.meshCount; ++i)
+	int32_t perChunkOffset = 0;
+	for (uint32_t i = 0; i < md.meshCount; ++i)
 	{
-		std::vector<uint32> perMaterialCount(md.submeshCount);
+		std::vector<uint32_t> perMaterialCount(md.submeshCount);
 
-		uint32 first = aResult.geometryOffset[i];
-		uint32 last = aResult.geometryOffset[i + 1];
-		uint32 firstInSorted = sorted.size();
-		for (uint32 t = first; t < last; ++t)
+		uint32_t first = aResult.geometryOffset[i];
+		uint32_t last = aResult.geometryOffset[i + 1];
+		uint32_t firstInSorted = sorted.size();
+		for (uint32_t t = first; t < last; ++t)
 		{
 			sorted.push_back(aResult.geometry[t]);
-			int32 cmat = sorted.back().materialId;
+			int32_t cmat = sorted.back().materialId;
 			if (cmat == kMaterialInteriorId)
 			{
 				cmat = mIntSurfaceMatIndex;
 			}
 			perMaterialCount[cmat]++;
 		}
-		for (uint32 mof = 0; mof < md.submeshCount; ++mof)
+		for (uint32_t mof = 0; mof < md.submeshCount; ++mof)
 		{
 			md.submeshOffsets[i * md.submeshCount + mof] = perChunkOffset * 3;
 			perChunkOffset += perMaterialCount[mof];
@@ -135,10 +149,10 @@ bool ObjFileWriter::appendMesh(const AuthoringResult& aResult, const char* /*ass
 	}
 	md.submeshOffsets[md.meshCount * md.submeshCount] = perChunkOffset * 3;
 
-	for (uint32 vc = 0; vc < triCount; ++vc)
+	for (uint32_t vc = 0; vc < triCount; ++vc)
 	{
 		Triangle& tri = sorted[vc];
-		uint32 i = vc * 3;
+		uint32_t i = vc * 3;
 		md.positions[i+0] = tri.a.p;
 		md.positions[i+1] = tri.b.p;
 		md.positions[i+2] = tri.c.p;
@@ -160,19 +174,19 @@ bool ObjFileWriter::appendMesh(const AuthoringResult& aResult, const char* /*ass
 
 bool ObjFileWriter::appendMesh(const ExporterMeshData& meshData, const char* /*assetName*/, bool /*nonSkinned*/)
 {
-	mMeshData = MakeShared<ExporterMeshData>(meshData);
+	mMeshData = std::shared_ptr<ExporterMeshData>(new ExporterMeshData(meshData));
 	return true;
 }
 
 bool ObjFileWriter::saveToFile(const char* assetName, const char* outputPath)
 {
-	if (!mMeshData)
+	if (mMeshData.get() == nullptr)
 	{
 		return false;
 	}
-	const ExporterMeshData& md = *mMeshData;
+	const ExporterMeshData& md = *mMeshData.get();
 
-	uint32 chunkCount = md.meshCount;
+	uint32_t chunkCount = md.meshCount;
 
 	// export materials (mtl file)
 	{		
@@ -181,7 +195,7 @@ bool ObjFileWriter::saveToFile(const char* assetName, const char* outputPath)
 		std::ostringstream mtlFilePath;
 		mtlFilePath << outputPath << "\\" << assetName << ".mtl";
 				
-		for (uint32 submeshIndex = 0; submeshIndex < md.submeshCount; ++submeshIndex)
+		for (uint32_t submeshIndex = 0; submeshIndex < md.submeshCount; ++submeshIndex)
 		{
 
 			outputString.Append(FString::Printf(TEXT("newmtl %s\n"), *FString(md.submeshMats[submeshIndex].name)));
@@ -216,32 +230,32 @@ bool ObjFileWriter::saveToFile(const char* assetName, const char* outputPath)
 		
 
 		/// Write compressed vertices
-		for (uint32 i = 0; i < md.positionsCount; ++i)
+		for (uint32_t i = 0; i < md.positionsCount; ++i)
 		{
 			outputString.Append(FString::Printf(TEXT("v %.4f %.4f %.4f\n"), md.positions[i].x, md.positions[i].y, md.positions[i].z));
 		}
-		for (uint32 i = 0; i < md.normalsCount; ++i)
+		for (uint32_t i = 0; i < md.normalsCount; ++i)
 		{
 			outputString.Append(FString::Printf(TEXT("vn %.4f %.4f %.4f\n"), md.normals[i].x, md.normals[i].y, md.normals[i].z));
 		}
-		for (uint32 i = 0; i < md.uvsCount; ++i)
+		for (uint32_t i = 0; i < md.uvsCount; ++i)
 		{
 			outputString.Append(FString::Printf(TEXT("vt %.4f %.4f\n"), md.uvs[i].x, md.uvs[i].y));
 		}
 
-		for (uint32 chunkIndex = 0; chunkIndex < chunkCount; ++chunkIndex)
+		for (uint32_t chunkIndex = 0; chunkIndex < chunkCount; ++chunkIndex)
 		{
 			outputString.Append(FString::Printf(TEXT("g %d \n"), chunkIndex));
-			for (uint32 submeshIndex = 0; submeshIndex < md.submeshCount; ++submeshIndex)
+			for (uint32_t submeshIndex = 0; submeshIndex < md.submeshCount; ++submeshIndex)
 			{
-				uint32 firstIdx = md.submeshOffsets[chunkIndex * md.submeshCount + submeshIndex];
-				uint32 lastIdx = md.submeshOffsets[chunkIndex * md.submeshCount + submeshIndex + 1];
+				uint32_t firstIdx = md.submeshOffsets[chunkIndex * md.submeshCount + submeshIndex];
+				uint32_t lastIdx = md.submeshOffsets[chunkIndex * md.submeshCount + submeshIndex + 1];
 				if (firstIdx == lastIdx) // There is no trianlges in this submesh.
 				{
 					continue;
 				}
 				outputString.Append(FString::Printf(TEXT("usemtl %s\n"), *FString(md.submeshMats[submeshIndex].name)));
-				for (uint32 i = firstIdx; i < lastIdx; i += 3)
+				for (uint32_t i = firstIdx; i < lastIdx; i += 3)
 				{
 					outputString.Append(FString::Printf(TEXT("f %d/%d/%d  "), md.posIndex[i] + 1, md.texIndex[i] + 1, md.normIndex[i] + 1));
 					outputString.Append(FString::Printf(TEXT("%d/%d/%d  "), md.posIndex[i + 1] + 1, md.texIndex[i + 1] + 1, md.normIndex[i + 1] + 1));

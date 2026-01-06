@@ -2,28 +2,25 @@
 #include "PhysicsEngine/PhysicsAsset.h"
 #include "Animation/Skeleton.h"
 #include "PhysicsEngine/BodySetup.h"
-#include "PhysicsEngine/SkeletalBodySetup.h"
+#include "PhysXPublic.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "Rendering/SkeletalMeshModel.h"
-#include "UObject/ObjectSaveContext.h"
-
-#include UE_INLINE_GENERATED_CPP_BY_NAME(BlastMesh)
-
 #if WITH_EDITOR
-#include "Engine/SkinnedAssetCommon.h"
 #include "RawMesh.h"
 #include "RawIndexBuffer.h"
+#include "NvBlast.h"
 #include "NvBlastGlobals.h"
 #endif
 
 #define LOCTEXT_NAMESPACE "Blast"
 
-UBlastMesh::UBlastMesh(const FObjectInitializer& ObjectInitializer) :
+UBlastMesh::UBlastMesh(const FObjectInitializer& ObjectInitializer):
 	Super(ObjectInitializer),
 	Mesh(nullptr),
 	Skeleton(nullptr),
 	PhysicsAsset(nullptr)
 {
+
 }
 
 bool UBlastMesh::IsValidBlastMesh()
@@ -32,22 +29,6 @@ bool UBlastMesh::IsValidBlastMesh()
 }
 
 #if WITH_EDITOR
-
-FTransform3f UBlastMesh::GetTransformUEToBlastCoordinateSystem()
-{
-	return GetTransformBlastToUECoordinateSystem().Inverse();
-}
-
-FTransform3f UBlastMesh::GetTransformBlastToUECoordinateSystem()
-{
-	//Blast coordinate system interpretation is : X = right, Y = forward, Z = up. centimeters
-	//UE4 is X = forward, Y = right, Z = up, centimeters
-
-	FTransform3f BlastToUE4Transform(FTransform::Identity);
-	BlastToUE4Transform.SetRotation(FRotator3f(0, 90.0f, 0).Quaternion()); // rotate from X=right in blast to X=forward in UE
-	BlastToUE4Transform.SetScale3D(FVector3f(-1.0f, 1.0f, 1.0f)); // because of rotation, the Y=forward of blast is now Y=left, so invert that
-	return BlastToUE4Transform;
-}
 
 void UBlastMesh::PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent)
 {
@@ -67,9 +48,7 @@ void UBlastMesh::GetAssetRegistryTags(TArray<FAssetRegistryTag>& OutTags) const
 	}
 #endif
 
-	PRAGMA_DISABLE_DEPRECATION_WARNINGS
 	Super::GetAssetRegistryTags(OutTags);
-	PRAGMA_ENABLE_DEPRECATION_WARNINGS
 }
 
 void UBlastMesh::PostLoad()
@@ -100,6 +79,40 @@ void UBlastMesh::PostLoad()
 
 #if WITH_EDITOR
 	// Make sure the order corresponds to that in the asset
+	const NvBlastAsset* Asset = FractureHistory.GetCurrentLoadedAsset().Get();
+	const uint32_t AssetChunkCount = NvBlastAssetGetChunkCount(Asset, Nv::Blast::logLL);
+	ChunkIndexMap.Empty();
+	const int32 ChunkCount = FractureToolData.VerticesOffset.Num() - 1;
+	if (AssetChunkCount == ChunkCount)
+	{
+		bool InvalidIndex = false;
+		const NvBlastChunk* AssetChunks = NvBlastAssetGetChunks(Asset, Nv::Blast::logLL);
+		for (int32 I = 0; I < ChunkCount; I++)
+		{
+			if (AssetChunks[I].userData >= (uint32_t)ChunkCount)
+			{
+				InvalidIndex = true;
+				break;
+			}
+		}
+
+		if (!InvalidIndex)
+		{
+			ChunkIndexMap.SetNum(ChunkCount);
+			bool Ordered = true;
+			for (int32 I = 0; I < ChunkCount; I++)
+			{
+				ChunkIndexMap[I] = AssetChunks[I].userData;
+				Ordered = Ordered && (ChunkIndexMap[I] == I);
+			}
+
+			if (Ordered)
+			{
+				ChunkIndexMap.Empty();
+			}
+		}
+	}
+
 	RebuildCookedBodySetupsIfRequired();
 
 	if (Mesh)
@@ -126,13 +139,13 @@ void UBlastMesh::PostLoad()
 #endif
 }
 
-void UBlastMesh::PreSave(FObjectPreSaveContext SaveContext)
+void UBlastMesh::PreSave(const class ITargetPlatform* TargetPlatform)
 {
 #if WITH_EDITOR
 	//Since can only do this in the editor, just make 100% sure this up to date if we are cooking
 	RebuildCookedBodySetupsIfRequired();
 #endif
-	Super::PreSave(SaveContext);
+	Super::PreSave(TargetPlatform);
 }
 
 void UBlastMesh::RebuildIndexToBoneNameMap()
@@ -176,7 +189,7 @@ void UBlastMesh::RebuildCookedBodySetupsIfRequired(bool bForceRebuild)
 	{
 		CookedChunkData.SetNum(ChunkCount);
 	}
-
+	
 	for (int32 ChunkIndex = 0; ChunkIndex < ChunkCount; ChunkIndex++)
 	{
 		FBlastCookedChunkData& CurCookedChunkData = CookedChunkData[ChunkIndex];
@@ -188,13 +201,12 @@ void UBlastMesh::RebuildCookedBodySetupsIfRequired(bool bForceRebuild)
 		{
 			//Transform these ahead of time and cache since InitialBoneTransform is constant
 			//Always make the initial actor at the component space origin, this allows the actor space to correspond to the at-rest position which Blast internally uses
-			USkeletalBodySetup* PhysicsAssetBodySetup = PhysicsAsset->SkeletalBodySetups[BodySetupIndex];
+			UBodySetup*  PhysicsAssetBodySetup = PhysicsAsset->SkeletalBodySetups[BodySetupIndex];
 			//Whenever this setup is changed the guid is changed
 			if (bForceRebuild || CurCookedChunkData.SourceBodySetupGUID != PhysicsAssetBodySetup->BodySetupGuid)
 			{
 				//rebuild this one
 				UBodySetup* CookedTransformedBodySetup = NewObject<UBodySetup>(this);
-				CookedTransformedBodySetup->bGenerateMirroredCollision = false;
 				//Copy the settings, but not the actual colliders
 				CookedTransformedBodySetup->CopyBodySetupProperty(PhysicsAssetBodySetup);
 				//We are on the root bone now
@@ -248,79 +260,139 @@ void UBlastMesh::RebuildCookedBodySetupsIfRequired(bool bForceRebuild)
 	}
 }
 
-TArray<FRawMesh> UBlastMesh::GetRenderMeshes(int32 LODIndex) const
+void UBlastMesh::GetRenderMesh(int32 LODIndex, TArray<FRawMesh>& RawMeshes)
 {
-	TArray<FRawMesh> RawMeshes;
-	
-	FSkeletalMeshImportData ImportData;
-	PRAGMA_DISABLE_DEPRECATION_WARNINGS
-	Mesh->LoadLODImportedData(LODIndex, ImportData);
-	PRAGMA_ENABLE_DEPRECATION_WARNINGS
+	FSkeletalMeshRenderData* RenderData = Mesh ? Mesh->GetResourceForRendering() : nullptr;
+	if (!RenderData)
+	{
+		return;
+	}
+
+	FSkeletalMeshModel& Resource = *Mesh->GetImportedModel();
+	if (!Resource.LODModels.IsValidIndex(LODIndex))
+	{
+		return;
+	}
 
 	const int32 ChunkCount = GetChunkCount();
-	RawMeshes.AddDefaulted(ChunkCount);
-	ensure(ChunkIndexToBoneIndex.Num() == ChunkCount);
-
 	TArray<uint32> TempBuffer;
 	TArray<int32> BoneIndexToChunkIndex;
-	BoneIndexToChunkIndex.Init(INDEX_NONE, ChunkCount + 1);
+	BoneIndexToChunkIndex.SetNum(Mesh->GetRefSkeleton().GetNum());
+	for (int32 I = 0; I < BoneIndexToChunkIndex.Num(); I++)
+	{
+		BoneIndexToChunkIndex[I] = INDEX_NONE;
+	}
 	for (int32 I = 0; I < ChunkCount; I++)
 	{
 		BoneIndexToChunkIndex[ChunkIndexToBoneIndex[I]] = I;
 	}
 
-	TArray<TSet<int32>> ChunkIndices;
-	TMap<int32, int32> VertToChunkIndex;
-	ChunkIndices.AddDefaulted(ChunkCount);
-	VertToChunkIndex.Reserve(ImportData.Influences.Num());
-	for (const auto& Influence : ImportData.Influences)
+	const FSkeletalMeshLODInfo* SrcLODInfo = Mesh->GetLODInfo(LODIndex);
+	if (!SrcLODInfo)
 	{
-		if (!BoneIndexToChunkIndex.IsValidIndex(Influence.BoneIndex))
-		{
-			continue;
-		}
-
-		const int32 ChunkIndex = BoneIndexToChunkIndex[Influence.BoneIndex];
-		if (!RawMeshes.IsValidIndex(ChunkIndex))
-		{
-			continue;
-		}
-
-		ChunkIndices[ChunkIndex].Add(Influence.VertexIndex);
-		VertToChunkIndex.Add(Influence.VertexIndex, ChunkIndex);
+		return;
 	}
 
-	TMap<int32, int32> VertIndexToVertIndexInChunk;
-	for (const auto& [VertIdx, ChunkIdx] : VertToChunkIndex)
+	const FSkeletalMeshLODModel& LODModel = Resource.LODModels[LODIndex];
+	const FSkeletalMeshLODRenderData& LODRenderData = RenderData->LODRenderData[LODIndex];
+
+	if (!LODRenderData.MultiSizeIndexContainer.IsIndexBufferValid())
 	{
-		VertIndexToVertIndexInChunk.Add(VertIdx, RawMeshes[ChunkIdx].VertexPositions.Num());
-		RawMeshes[ChunkIdx].VertexPositions.Add(ImportData.Points[VertIdx]);
+		return;
 	}
 
-	for (const auto& Face : ImportData.Faces)
+	TArray<FSoftSkinVertex> MeshVerts;
+	LODModel.GetVertices(MeshVerts);
+
+	const uint32 NumTexCoords = FMath::Min(LODRenderData.GetNumTexCoords(), (uint32)MAX_MESH_TEXTURE_COORDS);
+	const int32 NumSections = LODModel.Sections.Num();
+	const FRawStaticIndexBuffer16or32Interface& IndexBuffer = *LODRenderData.MultiSizeIndexContainer.GetIndexBuffer();
+
+	for (int32 SectionIndex = 0; SectionIndex < NumSections; SectionIndex++)
 	{
-		const int32 VertIdx = ImportData.Wedges[Face.WedgeIndex[0]].VertexIndex;
-		if (const int32* ChunkIdx = VertToChunkIndex.Find(VertIdx))
+		const FSkelMeshSection& SkelMeshSection = LODModel.Sections[SectionIndex];
+		if (!SkelMeshSection.bDisabled)
 		{
-			for (int32 Vert = 0; Vert < 3; Vert++)
+			int32 MaterialIndex = SkelMeshSection.MaterialIndex;
+			// use the remapping of material indices for all LODs besides the base LOD 
+			if (LODIndex > 0 && SrcLODInfo->LODMaterialMap.IsValidIndex(SkelMeshSection.MaterialIndex))
 			{
-				const auto& Wedge = ImportData.Wedges[Face.WedgeIndex[Vert]];
-				RawMeshes[*ChunkIdx].WedgeIndices.Add(VertIndexToVertIndexInChunk[Wedge.VertexIndex]);
-				RawMeshes[*ChunkIdx].WedgeColors.Add(Wedge.Color);
-				for (uint32 UV = 0; UV < ImportData.NumTexCoords; UV++)
-				{
-					RawMeshes[*ChunkIdx].WedgeTexCoords[UV].Add(Wedge.UVs[UV]);
-				}
-				RawMeshes[*ChunkIdx].WedgeTangentX.Add(Face.TangentX[Vert]);
-				RawMeshes[*ChunkIdx].WedgeTangentY.Add(Face.TangentY[Vert]);
-				RawMeshes[*ChunkIdx].WedgeTangentZ.Add(Face.TangentZ[Vert]);
+				MaterialIndex = FMath::Clamp<int32>(SrcLODInfo->LODMaterialMap[SkelMeshSection.MaterialIndex], 0, Mesh->GetMaterials().Num());
 			}
-			RawMeshes[*ChunkIdx].FaceMaterialIndices.Add(Face.MatIndex);
-			RawMeshes[*ChunkIdx].FaceSmoothingMasks.Add(Face.SmoothingGroups);
+
+			// Build 'wedge' info
+			const int32 NumTriangles = SkelMeshSection.NumTriangles;
+			for (int32 TriIndex = 0; TriIndex < NumTriangles; TriIndex++)
+			{
+				int32 ChunkIndex = INDEX_NONE;
+				for (int32 WedgeIndex = 0; WedgeIndex < 3; WedgeIndex++)
+				{
+					const int32 VertexIndexForWedge = IndexBuffer.Get(SkelMeshSection.BaseIndex + TriIndex * 3 + WedgeIndex);
+					const FSoftSkinVertex& SkinnedVertex = MeshVerts[VertexIndexForWedge];
+
+					FBoneIndexType BoneIndex;
+					if (SkinnedVertex.GetRigidWeightBone(BoneIndex))
+					{
+						ChunkIndex = BoneIndexToChunkIndex[SkelMeshSection.BoneMap[BoneIndex]];
+						break;
+					}
+				}
+
+				if (ChunkIndex == INDEX_NONE || ChunkIndex >= RawMeshes.Num())
+				{
+					continue;
+				}
+				auto& RawMesh = RawMeshes[ChunkIndex];
+				TMap<int32, int32> SkelToChunkMeshVertIdMap;
+
+				// copy face info
+				RawMesh.FaceMaterialIndices.Add(MaterialIndex);
+				//Leave empty since the skeletal mesh code doesn't save this
+				//RawMesh.FaceSmoothingMasks.Add(-1); // Assume this is ignored as bRecomputeNormals is false
+
+				for (int32 WedgeIndex = 0; WedgeIndex < 3; WedgeIndex++)
+				{
+					const int32 VertexIndexForWedge = IndexBuffer.Get(SkelMeshSection.BaseIndex + TriIndex * 3 + WedgeIndex);
+					const FSoftSkinVertex& SkinnedVertex = MeshVerts[VertexIndexForWedge];
+					int32* ChunkVertexIndex = SkelToChunkMeshVertIdMap.Find(VertexIndexForWedge);
+					if (ChunkVertexIndex == nullptr)
+					{
+						SkelToChunkMeshVertIdMap.Add(VertexIndexForWedge, RawMesh.VertexPositions.Num());
+						RawMesh.WedgeIndices.Add(RawMesh.VertexPositions.Num());
+						RawMesh.VertexPositions.Add(SkinnedVertex.Position);
+					}
+					else
+					{
+						RawMesh.WedgeIndices.Add(*ChunkVertexIndex);
+					}
+					RawMesh.WedgeTangentX.Add(SkinnedVertex.TangentX);
+					RawMesh.WedgeTangentY.Add(SkinnedVertex.TangentY);
+					RawMesh.WedgeTangentZ.Add(SkinnedVertex.TangentZ);
+
+					for (uint32 TexCoordIndex = 0; TexCoordIndex < MAX_MESH_TEXTURE_COORDS; TexCoordIndex++)
+					{
+						if (TexCoordIndex >= NumTexCoords)
+						{
+							RawMesh.WedgeTexCoords[TexCoordIndex].AddDefaulted();
+						}
+						else
+						{
+							RawMesh.WedgeTexCoords[TexCoordIndex].Add(SkinnedVertex.UVs[TexCoordIndex]);
+						}
+					}
+
+					if (LODRenderData.StaticVertexBuffers.ColorVertexBuffer.IsInitialized())
+					{
+						RawMesh.WedgeColors.Add(SkinnedVertex.Color);
+					}
+					else
+					{
+						RawMesh.WedgeColors.Add(FColor::White);
+					}
+				}
+			}
 		}
 	}
-
-	return RawMeshes;
 }
 
 void UBlastMesh::CopyFromLoadedAsset(const NvBlastAsset* AssetToCopy, const FGuid& NewAssetGUID)
@@ -381,63 +453,66 @@ void FBlastCookedChunkData::PopulateBodySetup(UBodySetup* NewBodySetup) const
 
 	//The assignment operators clear these so make sure we cache them before we touch the arrays
 	ConvexMeshTempList ConvexMeshes;
+	ConvexMeshTempList MirroredConvexMeshes;
 	for (auto& C : CookedBodySetup->AggGeom.ConvexElems)
 	{
-#if BLAST_USE_PHYSX
 		physx::PxConvexMesh* Mesh = C.GetConvexMesh();
 		if (Mesh)
 		{
 			Mesh->acquireReference();
 		}
 		ConvexMeshes.Add(Mesh);
-#else
-		ConvexMeshes.Add(C.GetChaosConvexMesh());
-#endif
+		Mesh = C.GetMirroredConvexMesh();
+		if (Mesh)
+		{
+			Mesh->acquireReference();
+		}
+		MirroredConvexMeshes.Add(Mesh);
 	}
 
 	NewBodySetup->CopyBodyPropertiesFrom(CookedBodySetup);
 
-	UpdateAfterShapesAdded(NewBodySetup, ConvexMeshes);
+	UpdateAfterShapesAdded(NewBodySetup, ConvexMeshes, MirroredConvexMeshes);
 }
 
-void FBlastCookedChunkData::AppendToBodySetup(UBodySetup* NewBodySetup) const
+void FBlastCookedChunkData::AppendToBodySetup(UBodySetup* NewBodySetup) const 
 {
 	//Make sure they are loaded
 	CookedBodySetup->CreatePhysicsMeshes();
 
 	//The assignment operators clear these so make sure we cache them before we touch the arrays
 	ConvexMeshTempList ConvexMeshes;
+	ConvexMeshTempList MirroredConvexMeshes;
 	for (auto& C : NewBodySetup->AggGeom.ConvexElems)
 	{
-#if BLAST_USE_PHYSX
 		//Already add-refed these before
 		ConvexMeshes.Add(C.GetConvexMesh());
-#else
-		ConvexMeshes.Add(C.GetChaosConvexMesh());
-#endif
+		MirroredConvexMeshes.Add(C.GetMirroredConvexMesh());
 	}
 
-	for (const auto& C : CookedBodySetup->AggGeom.ConvexElems)
+	for (auto& C : CookedBodySetup->AggGeom.ConvexElems)
 	{
-#if BLAST_USE_PHYSX
 		physx::PxConvexMesh* Mesh = C.GetConvexMesh();
 		if (Mesh)
 		{
 			Mesh->acquireReference();
 		}
 		ConvexMeshes.Add(Mesh);
-#else
-		ConvexMeshes.Add(C.GetChaosConvexMesh());
-#endif
+		Mesh = C.GetMirroredConvexMesh();
+		if (Mesh)
+		{
+			Mesh->acquireReference();
+		}
+		MirroredConvexMeshes.Add(Mesh);
 	}
 
 	//Should we check the PhysicalMaterial, etc are the same
 	NewBodySetup->AddCollisionFrom(CookedBodySetup);
 
-	UpdateAfterShapesAdded(NewBodySetup, MoveTemp(ConvexMeshes));
+	UpdateAfterShapesAdded(NewBodySetup, ConvexMeshes, MirroredConvexMeshes);
 }
 
-void FBlastCookedChunkData::UpdateAfterShapesAdded(UBodySetup* NewBodySetup, ConvexMeshTempList ConvexMeshes)
+void FBlastCookedChunkData::UpdateAfterShapesAdded(UBodySetup* NewBodySetup, ConvexMeshTempList& ConvexMeshes, ConvexMeshTempList& MirroredConvexMeshes) const
 {
 	//Always make sure these get set since they are cleared on copy
 	bool bAllThere = true;
@@ -445,18 +520,10 @@ void FBlastCookedChunkData::UpdateAfterShapesAdded(UBodySetup* NewBodySetup, Con
 	for (int32 C = 0; C < ConvexCount; C++)
 	{
 		auto& New = NewBodySetup->AggGeom.ConvexElems[C];
+		bAllThere &= (ConvexMeshes[C] != nullptr &&  MirroredConvexMeshes[C] != nullptr);
 
-		bAllThere &= ConvexMeshes.IsValidIndex(C) && ConvexMeshes[C];
-		if (!bAllThere)
-		{
-			break;
-		}
-
-#if BLAST_USE_PHYSX
 		New.SetConvexMesh(ConvexMeshes[C]);
-#else
-		New.SetConvexMeshObject(MoveTemp(ConvexMeshes[C]));
-#endif
+		New.SetMirroredConvexMesh(MirroredConvexMeshes[C]);
 	}
 
 	//If any are missing we need to fallback to runtime cooking

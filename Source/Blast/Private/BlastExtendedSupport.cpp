@@ -5,13 +5,11 @@
 #include "Components/BillboardComponent.h"
 #include "Engine/Texture2D.h"
 #include "PhysicsEngine/BodySetup.h"
+#include "PhysXPublic.h"
 #include "PhysicsPublic.h"
+#include "PhysicsEngine/PhysicsAsset.h"
 #include "ShowFlags.h"
 #include "SceneManagement.h"
-#include "Physics/Experimental/ChaosScopedSceneLock.h"
-#include "Physics/Experimental/PhysScene_Chaos.h"
-
-#include UE_INLINE_GENERATED_CPP_BY_NAME(BlastExtendedSupport)
 
 UBlastExtendedSupportMeshComponent::UBlastExtendedSupportMeshComponent(const FObjectInitializer& ObjectInitializer)
 	: UBlastMeshComponent(ObjectInitializer)
@@ -61,7 +59,8 @@ void UBlastExtendedSupportMeshComponent::SetChunkVisible(int32 ChunkIndex, bool 
 
 bool UBlastExtendedSupportMeshComponent::PopulateComponentBoneTransforms(TArray<FTransform>& Transforms, TBitArray<>& BonesTouched, int32 ComponentIndex)
 {
-	if (!SavedComponents.IsValidIndex(ComponentIndex))
+	auto PScene = GetPXScene();
+	if (!PScene || !SavedComponents.IsValidIndex(ComponentIndex))
 	{
 		//During cooking there is no PhysX scene, so nothing to sync
 		return false;
@@ -78,7 +77,7 @@ bool UBlastExtendedSupportMeshComponent::PopulateComponentBoneTransforms(TArray<
 
 	UBlastMesh* ComponentBlastMesh = Component.MeshComponent->GetBlastMesh();
 
-	FScopedSceneLock_Chaos Lock(GetWorld()->GetPhysicsScene(), EPhysicsInterfaceScopedLockType::Read);
+	SCENE_LOCK_READ(PScene);
 	for (int32 ActorIndex = BlastActorsBeginLive; ActorIndex < BlastActorsEndLive; ActorIndex++)
 	{
 		FActorData& ActorData = BlastActors[ActorIndex];
@@ -115,6 +114,7 @@ bool UBlastExtendedSupportMeshComponent::PopulateComponentBoneTransforms(TArray<
 			}
 		}
 	}
+	SCENE_UNLOCK_READ(PScene);
 
 	return bAnyBodiesChanged;
 }
@@ -124,7 +124,7 @@ FBox UBlastExtendedSupportMeshComponent::GetWorldBoundsOfComponentChunks(int32 C
 	FBox NewBox(ForceInit);
 	if (SavedComponents.IsValidIndex(ComponentIndex))
 	{
-		FScopedSceneLock_Chaos Lock(GetWorld()->GetPhysicsScene(), EPhysicsInterfaceScopedLockType::Read);
+		SCOPED_SCENE_READ_LOCK(GetPXScene());
 		for (int32 ActorIndex = BlastActorsBeginLive; ActorIndex < BlastActorsEndLive; ActorIndex++)
 		{
 			UBodySetup* BodySetup = ActorBodySetups[ActorIndex];
@@ -145,7 +145,7 @@ FBox UBlastExtendedSupportMeshComponent::GetWorldBoundsOfComponentChunks(int32 C
 						break;
 					}
 				}
-
+				
 			}
 		}
 	}
@@ -303,11 +303,11 @@ void UBlastExtendedSupportMeshComponent::SendRenderDynamicData_Concurrent()
 		}
 
 		ENQUEUE_RENDER_COMMAND(DebugRenderData)([BlastProxy{ static_cast<FBlastMeshSceneProxyNoRender*>(BlastProxy) }, ProxyLocalToWorld{ GetComponentTransform().ToMatrixWithScale() }, MeshComponentSpaceTransforms{ GetComponentSpaceTransforms() }, SelectedComponentProxies{ MoveTemp(SelectedComponentProxies) }](FRHICommandList& RHICmdList) mutable
-			{
-				BlastProxy->ProxyLocalToWorld = ProxyLocalToWorld;
-				BlastProxy->MeshComponentSpaceTransforms = MoveTemp(MeshComponentSpaceTransforms);
-				BlastProxy->SelectedComponentProxies = SelectedComponentProxies;
-			});
+		{
+			BlastProxy->ProxyLocalToWorld = ProxyLocalToWorld;
+			BlastProxy->MeshComponentSpaceTransforms = MoveTemp(MeshComponentSpaceTransforms);
+			BlastProxy->SelectedComponentProxies = SelectedComponentProxies;
+		});
 	}
 #endif
 }
@@ -316,7 +316,7 @@ bool UBlastExtendedSupportMeshComponent::ShouldUpdateTransform(bool bLODHasChang
 {
 #if WITH_EDITOR
 	//If we are rendering debug mode make sure the bounds are up to date since we will get culled since our mesh is tiny
-	if (StressDebugMode != EBlastStressDebugRenderMode::None || bDrawSupportGraph || bDrawChunkCentroids)
+	if (BlastDebugRenderMode != EBlastDebugRenderMode::None)
 	{
 		return true;
 	}
@@ -325,12 +325,12 @@ bool UBlastExtendedSupportMeshComponent::ShouldUpdateTransform(bool bLODHasChang
 	return Super::ShouldUpdateTransform(bLODHasChanged) && GetUsedDebrisProperties().DebrisFilters.Num() > 0;
 }
 
-void UBlastExtendedSupportMeshComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+void UBlastExtendedSupportMeshComponent::TickComponent(float DeltaTime, enum ELevelTick TickType, FActorComponentTickFunction *ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 #if WITH_EDITOR
 	if (IsSelected() || IsOwnerSelected() || WasSelectedLastFrame)
-	{
+	{ 
 		MarkRenderDynamicDataDirty();
 	}
 	WasSelectedLastFrame = IsSelected() || IsOwnerSelected();
