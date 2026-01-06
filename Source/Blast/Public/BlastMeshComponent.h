@@ -650,6 +650,18 @@ public:
 
 	virtual bool IsSimulatingPhysics(FName BoneName = NAME_None) const override;
 
+	// Collision override functions for proper projectile hit detection on individual pieces
+	virtual bool OverlapComponent(const FVector& Pos, const FQuat& Rot, const FCollisionShape& CollisionShape) override;
+	virtual bool ComponentOverlapMultiImpl(TArray<struct FOverlapResult>& OutOverlaps, const class UWorld* InWorld, const FVector& Pos, const FQuat& Rot, ECollisionChannel TestChannel, const struct FComponentQueryParams& Params, const struct FCollisionObjectQueryParams& ObjectQueryParams = FCollisionObjectQueryParams::DefaultObjectQueryParam) const override;
+	virtual bool ComponentOverlapComponentImpl(class UPrimitiveComponent* PrimComp, const FVector Pos, const FQuat& Rot, const FCollisionQueryParams& Params) override;
+	virtual bool SweepComponent(FHitResult& OutHit, const FVector Start, const FVector End, const FQuat& ShapeRotation, const FCollisionShape& CollisionShape, bool bTraceComplex = false) override;
+
+	// Helper functions to iterate over all body instances
+	void ForEachBody(TFunctionRef<void(FBodyInstance*)> Worker);
+	void ForEachBody(TFunctionRef<void(const FBodyInstance*)> Worker) const;
+	void ForEachBodyEx(TFunctionRef<void(FBodyInstance*, bool&)> Worker);
+	void ForEachBodyEx(TFunctionRef<void(const FBodyInstance*, bool&)> Worker) const;
+
 	virtual void AddRadialImpulse(FVector Origin, float Radius, float Strength, enum ERadialImpulseFalloff Falloff, bool bVelChange = false) override;
 	virtual void AddRadialForce(FVector Origin, float Radius, float Strength, enum ERadialImpulseFalloff Falloff, bool bAccelChange = false) override;
 

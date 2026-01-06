@@ -92,6 +92,10 @@ UBlastMeshComponent::UBlastMeshComponent(const FObjectInitializer& ObjectInitial
 	BodyInstance.SetCollisionProfileName(CollisionProfileName);
 	DynamicChunkBodyInstance.SetCollisionProfileName(CollisionProfileName);
 	DynamicChunkBodyInstance.SetResponseToChannel(ECC_Pawn, ECR_Ignore);
+	SmallChunkBodyInstance.SetCollisionProfileName(CollisionProfileName);
+	SmallChunkBodyInstance.SetResponseToChannel(ECC_Pawn, ECR_Ignore);
+	CrumbledChunkBodyInstance.SetCollisionProfileName(CollisionProfileName);
+	CrumbledChunkBodyInstance.SetResponseToChannel(ECC_Pawn, ECR_Ignore);
 
 	SetActive(true);
 	bMultiBodyOverlap = true;
@@ -102,6 +106,8 @@ UBlastMeshComponent::UBlastMeshComponent(const FObjectInitializer& ObjectInitial
 	//Turn on by default to enable impact damage, etc.
 	BodyInstance.bNotifyRigidBodyCollision = true;
 	DynamicChunkBodyInstance.bNotifyRigidBodyCollision = true;
+	SmallChunkBodyInstance.bNotifyRigidBodyCollision = true;
+	CrumbledChunkBodyInstance.bNotifyRigidBodyCollision = true;
 	bOverride_DebrisProperties = true;
 	FBlastDebrisFilter DebrisFilter;
 	DebrisFilter.bUseDebrisMaxSeparation = true;
@@ -1406,6 +1412,148 @@ void UBlastMeshComponent::OnUpdateTransform(EUpdateTransformFlags UpdateTransfor
 		SCENE_UNLOCK_WRITE(PXScene);
 		bLocked = false;
 	}
+}
+
+void UBlastMeshComponent::ForEachBody(TFunctionRef<void(FBodyInstance*)> Worker)
+{
+	for (int32 Idx = BlastActorsBeginLive; Idx < BlastActorsEndLive; Idx++)
+	{
+		if (BlastActors[Idx].BodyInstance)
+		{
+			Worker(BlastActors[Idx].BodyInstance);
+		}
+	}
+}
+
+void UBlastMeshComponent::ForEachBody(TFunctionRef<void(const FBodyInstance*)> Worker) const
+{
+	for (int32 Idx = BlastActorsBeginLive; Idx < BlastActorsEndLive; Idx++)
+	{
+		if (BlastActors[Idx].BodyInstance)
+		{
+			Worker(BlastActors[Idx].BodyInstance);
+		}
+	}
+}
+
+void UBlastMeshComponent::ForEachBodyEx(TFunctionRef<void(FBodyInstance*, bool&)> Worker)
+{
+	bool bDone = false;
+	for (int32 Idx = BlastActorsBeginLive; Idx < BlastActorsEndLive; Idx++)
+	{
+		if (BlastActors[Idx].BodyInstance)
+		{
+			Worker(BlastActors[Idx].BodyInstance, bDone);
+		}
+		if (bDone)
+		{
+			break;
+		}
+	}
+}
+
+void UBlastMeshComponent::ForEachBodyEx(TFunctionRef<void(const FBodyInstance*, bool&)> Worker) const
+{
+	bool bDone = false;
+	for (int32 Idx = BlastActorsBeginLive; Idx < BlastActorsEndLive; Idx++)
+	{
+		if (BlastActors[Idx].BodyInstance)
+		{
+			Worker(BlastActors[Idx].BodyInstance, bDone);
+		}
+		if (bDone)
+		{
+			break;
+		}
+	}
+}
+
+bool UBlastMeshComponent::OverlapComponent(const FVector& Pos, const FQuat& Rot, const FCollisionShape& CollisionShape)
+{
+	bool bSuccess = false;
+	ForEachBodyEx(
+		[&](const FBodyInstance* Body, bool& bDone)
+		{
+			if (Body->OverlapTest(Pos, Rot, CollisionShape))
+			{
+				bDone = true;
+				bSuccess = true;
+			}
+		});
+
+	return bSuccess;
+}
+
+bool UBlastMeshComponent::ComponentOverlapComponentImpl(class UPrimitiveComponent* PrimComp, const FVector Pos, const FQuat& Rot, const FCollisionQueryParams& Params)
+{
+	// we do not support skinned mesh vs skinned mesh overlap test
+	if (PrimComp->IsA<USkinnedMeshComponent>())
+	{
+		UE_LOG(LogCollision, Warning,
+			TEXT("ComponentOverlapComponent : (%s) Does not support skinnedmesh with Physics Asset"),
+			*PrimComp->GetPathName());
+		return false;
+	}
+
+	TArray<FBodyInstance*> Bodies;
+	Bodies.Reserve(BlastActors.Num());
+	ForEachBody(
+		[&Bodies](FBodyInstance* Body)
+		{
+			Bodies.Add(Body);
+		});
+
+	if (const FBodyInstance* Body = PrimComp->GetBodyInstance())
+	{
+		return Body->OverlapTestForBodies(Pos, Rot, Bodies);
+	}
+
+	return false;
+}
+
+bool UBlastMeshComponent::ComponentOverlapMultiImpl(TArray<struct FOverlapResult>& OutOverlaps, const UWorld* World, const FVector& Pos, const FQuat& Quat, ECollisionChannel TestChannel, const struct FComponentQueryParams& Params, const struct FCollisionObjectQueryParams& ObjectQueryParams) const
+{
+	OutOverlaps.Reset();
+
+	const FTransform WorldToComponent(GetComponentTransform().Inverse());
+	const FCollisionResponseParams ResponseParams(GetCollisionResponseToChannels());
+
+	FComponentQueryParams ParamsWithSelf = Params;
+	ParamsWithSelf.AddIgnoredComponent(this);
+
+	bool bHaveBlockingHit = false;
+	ForEachBody(
+		[&](const FBodyInstance* Body)
+		{
+			checkSlow(Body);
+			if (Body->OverlapMulti(OutOverlaps, World, &WorldToComponent, Pos, Quat, TestChannel, ParamsWithSelf, ResponseParams, ObjectQueryParams))
+			{
+				bHaveBlockingHit = true;
+			}
+		});
+
+	return bHaveBlockingHit;
+}
+
+bool UBlastMeshComponent::SweepComponent(FHitResult& OutHit, const FVector Start, const FVector End, const FQuat& ShapeWorldRotation, const FCollisionShape& CollisionShape, bool bTraceComplex)
+{
+	bool bHaveHit = false;
+
+	FHitResult Hit;
+	ForEachBody([&](FBodyInstance* Body)
+	{
+		checkSlow(Body);
+		if (Body->Sweep(Hit, Start, End, ShapeWorldRotation, CollisionShape, bTraceComplex))
+		{
+			if (!bHaveHit || Hit.Time < OutHit.Time)
+			{
+				OutHit = Hit;
+			}
+			bHaveHit = true;
+		}
+	});
+
+	return bHaveHit;
 }
 
 UBlastAsset* UBlastMeshComponent::GetBlastAsset(bool bAllowModifiedAsset) const
