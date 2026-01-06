@@ -48,6 +48,13 @@ namespace UnrealBuildTool.Rules
                 DLLSuffix = ".so";
                 LibSuffix = ".so";
             }
+            else if (Rules.Target.Platform == UnrealTargetPlatform.Android)
+            {
+                // Android uses static libraries (.a)
+                DLLPrefix = "lib";
+                DLLSuffix = "";  // No DLL loading on Android
+                LibSuffix = ".a";
+            }
 
             Rules.PublicDefinitions.Add(string.Format("BLAST_LIB_DLL_SUFFIX=\"{0}\"", DLLSuffix));
             Rules.PublicDefinitions.Add(string.Format("BLAST_LIB_DLL_PREFIX=\"{0}\"", DLLPrefix));
@@ -55,9 +62,14 @@ namespace UnrealBuildTool.Rules
             foreach (string Lib in BlastLibs)
             {
                 Rules.PublicAdditionalLibraries.Add(Path.Combine(BLASTLibDir, String.Format("{0}{1}{2}", DLLPrefix, Lib, LibSuffix)));
-                var DllName = String.Format("{0}{1}{2}", DLLPrefix, Lib, DLLSuffix);
-                Rules.PublicDelayLoadDLLs.Add(DllName);
-                Rules.RuntimeDependencies.Add(Path.Combine(BLASTLibDir, DllName));
+                
+                // Android uses static libraries, no DLL loading needed
+                if (Rules.Target.Platform != UnrealTargetPlatform.Android)
+                {
+                    var DllName = String.Format("{0}{1}{2}", DLLPrefix, Lib, DLLSuffix);
+                    Rules.PublicDelayLoadDLLs.Add(DllName);
+                    Rules.RuntimeDependencies.Add(Path.Combine(BLASTLibDir, DllName));
+                }
             }
 
             if (bUsePhysX)
@@ -77,6 +89,12 @@ namespace UnrealBuildTool.Rules
         public Blast(ReadOnlyTargetRules Target) : base(Target)
         {
             OptimizeCode = CodeOptimization.InNonDebugBuilds;
+
+            // Android uses Cap'n Proto in LITE mode
+            if (Target.Platform == UnrealTargetPlatform.Android)
+            {
+                PublicDefinitions.Add("CAPNP_LITE=1");
+            }
 
             PrivateDependencyModuleNames.AddRange(
                 new string[]
@@ -111,14 +129,35 @@ namespace UnrealBuildTool.Rules
                 }
             );
 
-            string[] BlastLibs =
+            string[] BlastLibs;
+            
+            // Android: Include core Blast libraries + serialization with Cap'n Proto
+            // Note: Stress extension skipped (needs SSE->NEON port)
+            // Note: PhysX serialization DTOs excluded (core serialization works)
+            if (Target.Platform == UnrealTargetPlatform.Android)
             {
-                 "NvBlast",
-                 "NvBlastGlobals",
-                 "NvBlastExtSerialization",
-                 "NvBlastExtShaders",
-                 "NvBlastExtStress",
-            };
+                BlastLibs = new string[]
+                {
+                     "NvBlast",
+                     "NvBlastGlobals",
+                     "NvBlastExtSerialization",
+                     "NvBlastExtShaders",
+                     // Cap'n Proto libraries required for serialization
+                     "capnp",
+                     "kj",
+                };
+            }
+            else
+            {
+                BlastLibs = new string[]
+                {
+                     "NvBlast",
+                     "NvBlastGlobals",
+                     "NvBlastExtSerialization",
+                     "NvBlastExtShaders",
+                     "NvBlastExtStress",
+                };
+            }
 
             PrivateIncludePaths.AddRange(
                 new string[]

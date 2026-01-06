@@ -56,8 +56,13 @@ void FBlastLoaderModule::StartupModule()
 
 	if (BlastExtStressHandle == nullptr)
 	{
+#if PLATFORM_ANDROID
+		// Stress library not available on Android - stress solver feature disabled
+		UE_LOG(LogBlastLoader, Warning, TEXT("Blast Stress library not available on Android. Stress solver feature disabled."));
+#else
 		UE_LOG(LogBlastLoader, Error, TEXT("Failed to load the Blast Damage Stress dll at %s"), *DllPath);
 		return;
+#endif
 	}
 
 }

@@ -765,7 +765,9 @@ protected:
 
 	void UpdateFractureBufferSize();
 
+#if !PLATFORM_ANDROID
 	void TickStressSolver();
+#endif
 
 	void UpdateDebris();
 	void UpdateDebris(int32 AcotrIndex, const FTransform& ActorTransform, struct FScopedSceneLock_Chaos* SceneLock);
@@ -773,7 +775,9 @@ protected:
 #if WITH_EDITOR
 	void DrawDebugChunkCentroids();
 	void DrawDebugSupportGraph();
+#if !PLATFORM_ANDROID
 	void DrawDebugStressGraph();
+#endif
 
 	TArray<FBatchedLine> PendingDebugLines;
 	TArray<FBatchedPoint> PendingDebugPoints;

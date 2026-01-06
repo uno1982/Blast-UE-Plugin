@@ -25,7 +25,9 @@
 #include "NvBlast.h"
 #include "NvBlastTypes.h"
 #include "blast-sdk/extensions/shaders/NvBlastExtDamageShaders.h"
+#if !PLATFORM_ANDROID
 #include "blast-sdk/extensions/stress/NvBlastExtStressSolver.h"
+#endif
 #include "blast-sdk/globals/NvBlastGlobals.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(BlastMeshComponent)
@@ -294,6 +296,8 @@ void UBlastMeshComponent::InitBlastFamilyInternal(NvBlastAsset* LLBlastAsset)
 	DamageAccelerator = NvBlastExtDamageAcceleratorCreate(LLBlastAsset, 3);
 
 	// Create stress solver if enabled (right after actor created, but before 'StressSolver->notifyActorCreated()' call)
+#if !PLATFORM_ANDROID
+	// Note: Stress solver not available on Android (NvBlastExtStress library requires SSE intrinsics)
 	if (GetUsedStressProperties().bCalculateStress)
 	{
 		StressSolver = Nv::Blast::ExtStressSolver::create(*BlastFamily.Get());
@@ -301,6 +305,12 @@ void UBlastMeshComponent::InitBlastFamilyInternal(NvBlastAsset* LLBlastAsset)
 		// TODO: set each node according to its mass, volume and local transform with setNodeInfo
 		StressSolver->setAllNodesInfoFromLL(density);
 	}
+#else
+	if (GetUsedStressProperties().bCalculateStress)
+	{
+		UE_LOG(LogBlast, Warning, TEXT("Stress solver requested but not available on Android. Ignoring bCalculateStress setting."));
+	}
+#endif
 }
 
 void UBlastMeshComponent::InitBlastFamily()
@@ -375,11 +385,13 @@ void UBlastMeshComponent::UninitBlastFamily()
 	}
 	DebrisCount = 0;
 
+#if !PLATFORM_ANDROID
 	if (StressSolver)
 	{
 		StressSolver->release();
 		StressSolver = nullptr;
 	}
+#endif
 
 	if (DamageAccelerator)
 	{
@@ -495,10 +507,12 @@ void UBlastMeshComponent::TickComponent(float DeltaTime, enum ELevelTick TickTyp
 	{
 		if (World->IsGameWorld())
 		{
+#if !PLATFORM_ANDROID
 			if (StressSolver)
 			{
 				TickStressSolver();
 			}
+#endif
 
 			UpdateDebris();
 		}
@@ -521,7 +535,9 @@ void UBlastMeshComponent::TickComponent(float DeltaTime, enum ELevelTick TickTyp
 				DrawDebugChunkCentroids();
 			}
 
+#if !PLATFORM_ANDROID
 			DrawDebugStressGraph();
+#endif
 		}
 
 		if (!PendingDebugLines.IsEmpty() || !PendingDebugPoints.IsEmpty() || bHadDebugLinesBefore)
@@ -2056,10 +2072,12 @@ EBlastDamageResult UBlastMeshComponent::ApplyDamageOnActor(uint32 actorIndex,
 	ProgramInput.localRot = FQuat4f(invWT.GetRotation() * WorldRotation);
 	ProgramInput.material = &GetUsedBlastMaterial();
 
+#if !PLATFORM_ANDROID
 	if (StressSolver)
 	{
 		DamageProgram.ExecuteStress(*StressSolver, actorIndex, BodyInst, ProgramInput, *this);
 	}
+#endif
 
 	RecentDamageEventsBuffer.Reset();
 
@@ -2360,6 +2378,7 @@ void UBlastMeshComponent::OnHit(UPrimitiveComponent* HitComponent, AActor* Other
 			const float ImpactImpulse = ImpactVelocity * ReducedMass;
 
 			// Pass impact impulse to stress solver?
+#if !PLATFORM_ANDROID
 			if (Actor && BodyInst && UsedStressProperties.bApplyImpactImpulses && UsedStressProperties.bCalculateStress
 				&& StressSolver)
 			{
@@ -2377,6 +2396,7 @@ void UBlastMeshComponent::OnHit(UPrimitiveComponent* HitComponent, AActor* Other
 
 				StressSolver->addForce(*Actor, (NvcVec3&)LocalPosition, (NvcVec3&)LocalForce);
 			}
+#endif
 
 			// Apply impact impulse damage ?
 			if (UsedImpactProperties.bEnabled)
@@ -2474,10 +2494,12 @@ void UBlastMeshComponent::Serialize(FArchive& Ar)
 
 void UBlastMeshComponent::NotifyStressSolverActorCreated(NvBlastActor& BlastActor)
 {
+#if !PLATFORM_ANDROID
 	if (StressSolver)
 	{
 		StressSolver->notifyActorCreated(BlastActor);
 	}
+#endif
 }
 
 void UBlastMeshComponent::SetupNewBlastActor(NvBlastActor* actor, const FBlastActorCreateInfo& CreateInfo,
@@ -2591,10 +2613,12 @@ void UBlastMeshComponent::BreakDownBlastActor(uint32 actorIndex)
 	FActorData& ActorData = BlastActors[actorIndex];
 	check(ActorData.BlastActor != nullptr);
 
+#if !PLATFORM_ANDROID
 	if (StressSolver)
 	{
 		StressSolver->notifyActorDestroyed(*ActorData.BlastActor);
 	}
+#endif
 
 	if (ActorData.TimerHandle.IsValid())
 	{
@@ -2923,7 +2947,7 @@ void UBlastMeshComponent::RefreshDynamicChunkBodyInstanceFromBodyInstance()
 	DynamicChunkBodyInstance.SetCollisionProfileName(CollsionProfileName);
 }
 
-
+#if !PLATFORM_ANDROID
 void UBlastMeshComponent::TickStressSolver()
 {
 	FVector Gravity;
@@ -3054,6 +3078,7 @@ void UBlastMeshComponent::TickStressSolver()
 		}
 	}
 }
+#endif // !PLATFORM_ANDROID
 
 void UBlastMeshComponent::UpdateDebris()
 {
@@ -3306,6 +3331,7 @@ void UBlastMeshComponent::DrawDebugSupportGraph()
 	}
 }
 
+#if !PLATFORM_ANDROID
 FLinearColor UnpackColor(uint32 color)
 {
 	const FLinearColor LinColor{FColor(color)};
@@ -3355,6 +3381,7 @@ void UBlastMeshComponent::DrawDebugStressGraph()
 		}
 	}
 }
+#endif // !PLATFORM_ANDROID
 
 void UBlastMeshComponent::DrawDebugLine(FVector const& LineStart, FVector const& LineEnd, FLinearColor const& Color,
                                         uint8 DepthPriority /*= 0*/, float Thickness /*= 0.f*/)

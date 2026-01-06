@@ -16,7 +16,7 @@
       "Name": "BlastLoader",
       "Type": "Runtime",
       "LoadingPhase": "PreDefault",
-      "WhitelistPlatforms": [ "Win64", "Linux" ]
+      "WhitelistPlatforms": [ "Win64", "Linux", "Android" ]
     },
     {
       "Name": "BlastLoaderEditor",
@@ -28,7 +28,7 @@
       "Name": "Blast",
       "Type": "Runtime",
       "LoadingPhase": "PreDefault",
-      "WhitelistPlatforms": [ "Win64", "Linux" ]
+      "WhitelistPlatforms": [ "Win64", "Linux", "Android" ]
     },
     {
       "Name": "BlastEditor",
