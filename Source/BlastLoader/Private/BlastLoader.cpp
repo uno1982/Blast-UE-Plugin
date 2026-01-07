@@ -11,6 +11,9 @@ FString GetBlastDLLPath(FString ConfigFolderName)
 	DllPath = FPaths::Combine(BaseDir, TEXT("Libraries/Win64/"));
 #elif PLATFORM_LINUX
 	DllPath = FPaths::Combine(BaseDir, TEXT("Libraries/Linux/"));
+#elif PLATFORM_ANDROID
+	// Android uses static libraries, no DLL path needed
+	DllPath = TEXT("");
 #else
 #error No Blast libraries for this platform
 #endif
@@ -20,6 +23,11 @@ FString GetBlastDLLPath(FString ConfigFolderName)
 
 void* LoadBlastDLL(const FString& DLLPath, const TCHAR* BaseName)
 {
+#if PLATFORM_ANDROID
+	// Android uses static libraries - no runtime DLL loading needed
+	return nullptr;
+#else
 	FString FullPath = DLLPath / BaseName;
 	return FPlatformProcess::GetDllHandle(*FullPath);
+#endif
 }

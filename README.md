@@ -34,6 +34,16 @@ NVIDIA Blast destruction plugin for **Unreal Engine 5** with full Android ARM64 
 
 Android ARM64 is fully supported. All pre-built libraries are included.
 
+### Build Requirements
+
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| NDK | r26b (26.1.10909125) | Required for UE 5.5 |
+| NDK API Level | android-29 | Minimum required |
+| JDK | Java 17 | Required for UE 5.5 Gradle |
+
+Configure these in UE Project Settings > Platforms > Android SDK.
+
 ### What Works
 - Core Blast fracture simulation
 - All damage programs (radial, shear, capsule, impact spread, etc.)
