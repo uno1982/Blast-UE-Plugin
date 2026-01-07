@@ -53,6 +53,16 @@ bBuildForArm64=True
 bBuildForArmV7=False
 ```
 
+### For 4.27-plus-meta Source Users
+
+If you're building from the [4.27-plus-meta](https://github.com/uno1982/UnrealEngine/tree/4.27-plus-meta) source branch, use the following SDK/NDK versions:
+
+| Component | Version |
+|-----------|---------|
+| JDK | OpenJDK 17.0.6 |
+| Android SDK Platform | android-29 |
+| NDK | 27.2.12479018 |
+
 ## Credits
 
 Based on [NVIDIAGameWorks/Blast](https://github.com/NVIDIAGameWorks/Blast) SDK.
