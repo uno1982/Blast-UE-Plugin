@@ -22,6 +22,10 @@ FBlastLoaderModule::FBlastLoaderModule():
 
 void FBlastLoaderModule::StartupModule()
 {
+#if PLATFORM_ANDROID
+	// Android uses static libraries linked at build time - no DLL loading needed
+	UE_LOG(LogBlastLoader, Log, TEXT("Blast libraries statically linked for Android."));
+#else
 	FString DllPath = GetBlastDLLPath(TEXT(BLAST_LIB_CONFIG_STRING));
 
 	BlastHandle = LoadBlastDLL(DllPath, TEXT(BLAST_LIB_DLL_PREFIX "NvBlast" BLAST_LIB_DLL_SUFFIX));
@@ -56,19 +60,15 @@ void FBlastLoaderModule::StartupModule()
 
 	if (BlastExtStressHandle == nullptr)
 	{
-#if PLATFORM_ANDROID
-		// Stress library not available on Android - stress solver feature disabled
-		UE_LOG(LogBlastLoader, Warning, TEXT("Blast Stress library not available on Android. Stress solver feature disabled."));
-#else
 		UE_LOG(LogBlastLoader, Error, TEXT("Failed to load the Blast Damage Stress dll at %s"), *DllPath);
 		return;
-#endif
 	}
-
+#endif
 }
 
 void FBlastLoaderModule::ShutdownModule()
 {
+#if !PLATFORM_ANDROID
 	if (BlastHandle != nullptr)
 	{
 		FPlatformProcess::FreeDllHandle(BlastHandle);
@@ -79,7 +79,7 @@ void FBlastLoaderModule::ShutdownModule()
 	{
 		FPlatformProcess::FreeDllHandle(BlastGlobalsHandle);
 		BlastGlobalsHandle = nullptr;
-}
+	}
 
 	if (BlastExtSerializationHandle != nullptr)
 	{
@@ -98,4 +98,5 @@ void FBlastLoaderModule::ShutdownModule()
 		FPlatformProcess::FreeDllHandle(BlastExtStressHandle);
 		BlastExtStressHandle = nullptr;
 	}
+#endif
 }

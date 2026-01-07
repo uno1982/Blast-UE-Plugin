@@ -50,6 +50,16 @@ On `BlastMesh` asset (Blast Material section):
 
 Android ARM64 is fully supported. All pre-built libraries are included.
 
+### Build Requirements
+
+| Requirement | Version | Notes |
+|-------------|---------|-------|
+| NDK | r25b (25.1.8937393) | Tested working version |
+| NDK API Level | android-29 | Minimum required |
+| JDK | OpenJDK 8 or 11 | Required for Gradle 6.1.1 (JDK 17+ not compatible) |
+
+Configure these in UE Project Settings > Platforms > Android SDK.
+
 ### What Works
 - Core Blast fracture simulation
 - All damage programs (radial, shear, capsule, impact spread, etc.)
