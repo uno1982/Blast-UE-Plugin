@@ -25,6 +25,8 @@
 #include "Engine/Texture2D.h"
 #include "MeshDescriptionOperations.h"
 #include "Chaos/Convex.h"
+#include "Chaos/Box.h"
+#include "Chaos/AABB.h"
 
 #include "BlastFractureSettings.h"
 #include "BlastMeshEditorModule.h"

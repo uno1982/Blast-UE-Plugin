@@ -33,6 +33,8 @@ namespace UnrealBuildTool.Rules
                 "InputCore",
                 "RenderCore",
                 "PhysicsCore",
+                "Chaos",
+                "ChaosCore",
                 "Slate",
                 "SlateCore",
                 "EditorStyle",
