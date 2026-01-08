@@ -2,16 +2,21 @@
 
 NVIDIA Blast destruction plugin for Unreal Engine.
 
+[![Blast Plugin Demo](https://img.youtube.com/vi/t8LBnQu4W1M/0.jpg)](https://www.youtube.com/watch?v=t8LBnQu4W1M)
+
+> 🎬 **[Watch the Demo Video](https://www.youtube.com/watch?v=t8LBnQu4W1M)**
+
 > ⚠️ **Note**: The `main` branch is currently downstream from [Project Borealis](https://github.com/ProjectBoreworialis) and does not function standalone. Please use one of the supported branches below.
 
 ## Supported Branches
 
 | Branch | UE Version | Platform Support |
 |--------|------------|------------------|
+| `5.7-android-support` | UE 5.7 | Windows, Linux, Android ARM64 |
+| `UE5-android-support` | UE 5.5 | Windows, Linux, Android ARM64 |
 | `5.4-android-support` | UE 5.4 | Windows, Linux, Android ARM64 |
 | `5.1-android-support` | UE 5.1 | Windows, Linux, Android ARM64 |
 | `4.27-android-support` | UE 4.27 | Windows, Linux, Android ARM64 |
-| `UE5-android-support` | UE 5.5 | Windows, Linux, Android ARM64 |
 
 ## Quick Start
 
