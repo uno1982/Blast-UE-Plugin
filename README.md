@@ -2,7 +2,21 @@
 
 NVIDIA Blast destruction plugin for **Unreal Engine 4.27** with PhysX physics.
 
+[![Blast Plugin Demo](https://img.youtube.com/vi/t8LBnQu4W1M/0.jpg)](https://www.youtube.com/watch?v=t8LBnQu4W1M)
+
+> 🎬 **[Watch the Demo Video](https://www.youtube.com/watch?v=t8LBnQu4W1M)**
+
 > **Looking for UE5?** See the [main branch](../../tree/main) for UE5/Chaos support.
+
+## Other Supported Versions
+
+| UE Version | Branch |
+|------------|--------|
+| UE 5.7 | `5.7-android-support` |
+| UE 5.5 | `UE5-android-support` |
+| UE 5.4 | `5.4-android-support` |
+| UE 5.1 | `5.1-android-support` |
+| UE 4.27 | `4.27-android-support` (this branch) |
 
 ## Supported Platforms
 
