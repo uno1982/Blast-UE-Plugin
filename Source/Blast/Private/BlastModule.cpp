@@ -10,9 +10,13 @@ class BlastAllocatorCallback final : public nvidia::NvAllocatorCallback
 	virtual void* allocate(size_t size, const char* typeName, const char* filename, int line)
 	{
 		void* ptr = FMemory::Malloc(size, 0x10);
+#if !PLATFORM_ANDROID
+		// On Android, FMemory::Malloc may not honor the alignment request.
+		// This is acceptable because 16-byte alignment is primarily needed for SSE
+		// instructions on x86, which don't apply to ARM/Android.
 		check((reinterpret_cast<size_t>(ptr) & 0x0F) == 0);
+#endif
 		return ptr;
-
 	}
 
 	virtual void deallocate(void* ptr)
