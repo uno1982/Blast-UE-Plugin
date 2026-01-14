@@ -1084,6 +1084,12 @@ public:
 		FPrimitiveComponentInstanceData::ApplyToComponent(Component, CacheApplyPhase);
 		UBlastMeshComponent* NewComponent = CastChecked<UBlastMeshComponent>(Component);
 
+		// Early out if the new component has no valid BlastMesh - don't apply stale data
+		if (!NewComponent->GetBlastMesh())
+		{
+			return;
+		}
+
 		//Make sure this is current
 		NewComponent->UpdateComponentToWorld(EUpdateTransformFlags::SkipPhysicsUpdate);
 		if (!NewComponent->GetComponentTransform().Equals(PrevWorldTransform) || !NewComponent->bSupportedByWorld)
@@ -1091,6 +1097,8 @@ public:
 			//Old ones are stale and unneeded
 			ModifiedAsset = nullptr;
 			ModifiedAssetOwned = nullptr;
+			SupportStructure = nullptr;
+			SupportStructureIndex = INDEX_NONE;
 		}
 
 		if (ModifiedAssetOwned)
@@ -1102,7 +1110,12 @@ public:
 
 		//This sets both members, and dirties the world build state if required
 		NewComponent->SetModifiedAsset(ModifiedAssetOwned ? ModifiedAssetOwned : ModifiedAsset);
-		NewComponent->SetOwningSuppportStructure(SupportStructure, SupportStructureIndex);
+		
+		// Only set support structure if it's still valid
+		if (SupportStructure && IsValid(SupportStructure))
+		{
+			NewComponent->SetOwningSuppportStructure(SupportStructure, SupportStructureIndex);
+		}
 	}
 
 	virtual void FindAndReplaceInstances(const TMap<UObject*, UObject*>& OldToNewInstanceMap) override
@@ -1132,9 +1145,19 @@ public:
 		Collector.AddReferencedObject(SupportStructure);
 	}
 
-	bool ContainsData() const
+	virtual bool ContainsData() const override
 	{
-		return FPrimitiveComponentInstanceData::ContainsData() || ModifiedAsset || ModifiedAssetOwned || SupportStructure || SupportStructureIndex != INDEX_NONE;
+		// Only report containing data if we have actual valid Blast-specific data to preserve
+		// This prevents the instance data system from caching/applying empty or stale data
+		if (ModifiedAsset || ModifiedAssetOwned)
+		{
+			return true;
+		}
+		if (SupportStructure && IsValid(SupportStructure))
+		{
+			return true;
+		}
+		return FPrimitiveComponentInstanceData::ContainsData();
 	}
 
 private:
@@ -1149,6 +1172,19 @@ private:
 //which happens a lot (on map load for example) since FActorComponentInstanceData::FActorComponentInstanceData skips those
 TStructOnScope<FActorComponentInstanceData> UBlastMeshComponent::GetComponentInstanceData() const
 {
+	// Only create custom instance data if we have actual data worth preserving
+	// This prevents crashes during blueprint compilation with invalid/stale pointers
+	if (!BlastMesh)
+	{
+		return Super::GetComponentInstanceData();
+	}
+	
+	// Only use custom instance data if we have modified asset or valid support structure
+	if (!ModifiedAsset && !ModifiedAssetOwned && !OwningSupportStructure)
+	{
+		return Super::GetComponentInstanceData();
+	}
+	
 	return MakeStructOnScope<FActorComponentInstanceData, FBlastMeshComponentInstanceData>(this);
 }
 
@@ -1296,6 +1332,17 @@ bool UBlastMeshComponent::HasValidPhysicsState() const
 
 void UBlastMeshComponent::OnRegister()
 {
+	// Set up skeletal mesh BEFORE calling Super::OnRegister() to prevent crash
+	// when USkinnedMeshComponent tries to access the mesh during registration
+	if (BlastMesh == nullptr)
+	{
+		SetSkeletalMesh(nullptr);
+	}
+	else
+	{
+		SetSkeletalMesh(BlastMesh->Mesh);
+	}
+
 	Super::OnRegister();
 
 	ConditionalUpdateComponentToWorld();
@@ -1319,14 +1366,8 @@ void UBlastMeshComponent::OnRegister()
 
 	ChunkVisibility.Reset();
 	ChunkToActorIndex.Reset();
-	if (BlastMesh == nullptr)
+	if (BlastMesh)
 	{
-		SetSkeletalMesh(nullptr);
-	}
-	else
-	{
-		SetSkeletalMesh(BlastMesh->Mesh);
-
 		ChunkVisibility.Init(false, BlastMesh->GetChunkCount());
 		ChunkToActorIndex.SetNumUninitialized(BlastMesh->GetChunkCount());
 		for (int32 C = 0; C < ChunkToActorIndex.Num(); C++)
@@ -1712,6 +1753,14 @@ bool UBlastMeshComponent::IsExtendedSupportDirty() const
 
 void UBlastMeshComponent::SetOwningSuppportStructure(ABlastExtendedSupportStructure* NewStructure, int32 Index)
 {
+	// Validate the new structure pointer before using it
+	if (NewStructure && !IsValid(NewStructure))
+	{
+		UE_LOG(LogBlast, Warning, TEXT("SetOwningSuppportStructure called with invalid structure pointer, ignoring"));
+		NewStructure = nullptr;
+		Index = INDEX_NONE;
+	}
+	
 	if (NewStructure != OwningSupportStructure || Index != OwningSupportStructureIndex)
 	{
 		FComponentReregisterContext ReregisterComponent(this);
