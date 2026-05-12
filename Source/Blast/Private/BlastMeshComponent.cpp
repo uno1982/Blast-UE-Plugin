@@ -298,18 +298,27 @@ void UBlastMeshComponent::InitBlastFamilyInternal(NvBlastAsset* LLBlastAsset)
 	// Create stress solver if enabled (right after actor created, but before 'StressSolver->notifyActorCreated()' call)
 #if !PLATFORM_ANDROID
 	// Note: Stress solver not available on Android (NvBlastExtStress library requires SSE intrinsics)
-	if (GetUsedStressProperties().bCalculateStress)
+	// Only create stress solver in game worlds (not during cooking or editor operations)
+	UWorld* World = GetWorld();
+	if (GetUsedStressProperties().bCalculateStress && World && World->IsGameWorld())
 	{
-		StressSolver = Nv::Blast::ExtStressSolver::create(*BlastFamily.Get());
-		if (StressSolver)
+		if (BlastFamily.IsValid() && BlastFamily.Get())
 		{
-			const float density = 0.000001f; // 1e-6 kg / cm3
-			// TODO: set each node according to its mass, volume and local transform with setNodeInfo
-			StressSolver->setAllNodesInfoFromLL(density);
+			StressSolver = Nv::Blast::ExtStressSolver::create(*BlastFamily.Get());
+			if (StressSolver)
+			{
+				const float density = 0.000001f; // 1e-6 kg / cm3
+				// TODO: set each node according to its mass, volume and local transform with setNodeInfo
+				StressSolver->setAllNodesInfoFromLL(density);
+			}
+			else
+			{
+				UE_LOG(LogBlast, Error, TEXT("Failed to create Blast stress solver."));
+			}
 		}
 		else
 		{
-			UE_LOG(LogBlast, Error, TEXT("Failed to create Blast stress solver."));
+			UE_LOG(LogBlast, Error, TEXT("Cannot create stress solver: BlastFamily is not valid."));
 		}
 	}
 #else
@@ -2957,6 +2966,11 @@ void UBlastMeshComponent::RefreshDynamicChunkBodyInstanceFromBodyInstance()
 #if !PLATFORM_ANDROID
 void UBlastMeshComponent::TickStressSolver()
 {
+	if (!StressSolver)
+	{
+		return;
+	}
+
 	FVector Gravity;
 #if BLAST_USE_PHYSX
 	Gravity = GetPXScene()->getGravity();
