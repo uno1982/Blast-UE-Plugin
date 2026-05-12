@@ -301,9 +301,16 @@ void UBlastMeshComponent::InitBlastFamilyInternal(NvBlastAsset* LLBlastAsset)
 	if (GetUsedStressProperties().bCalculateStress)
 	{
 		StressSolver = Nv::Blast::ExtStressSolver::create(*BlastFamily.Get());
-		const float density = 0.000001f; // 1e-6 kg / cm3
-		// TODO: set each node according to its mass, volume and local transform with setNodeInfo
-		StressSolver->setAllNodesInfoFromLL(density);
+		if (StressSolver)
+		{
+			const float density = 0.000001f; // 1e-6 kg / cm3
+			// TODO: set each node according to its mass, volume and local transform with setNodeInfo
+			StressSolver->setAllNodesInfoFromLL(density);
+		}
+		else
+		{
+			UE_LOG(LogBlast, Error, TEXT("Failed to create Blast stress solver."));
+		}
 	}
 #else
 	if (GetUsedStressProperties().bCalculateStress)
@@ -3486,7 +3493,9 @@ FBlastMeshSceneProxy::FBlastMeshSceneProxy(const UBlastMeshComponent* Component,
 	FBlastMeshSceneProxyBase(Component),
 	FSkeletalMeshSceneProxy(Component, InSkelMeshRenderData)
 {
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
 	PhysicsAssetForDebug = Component->GetBlastMesh()->PhysicsAsset;
+#endif
 
 	if (Component && Component->bPerBoneMotionBlur)
 	{
