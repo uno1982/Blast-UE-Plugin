@@ -566,7 +566,7 @@ void CreateSkeletalMeshFromAuthoring(TSharedPtr<FFractureSession> FractureSessio
 	// process bone influences from import data
 	SkeletalMeshImportUtils::ProcessImportMeshInfluences(ImportData, SkeletalMesh->GetPathName());
 
-	SkeletalMesh->ResetLODInfo();
+	SkeletalMesh->SetNumSourceModels(0);
 	FSkeletalMeshLODInfo& NewLODInfo = SkeletalMesh->AddLODInfo();
 	NewLODInfo.ReductionSettings.NumOfTrianglesPercentage = 1.0f;
 	NewLODInfo.ReductionSettings.NumOfVertPercentage = 1.0f;
@@ -591,7 +591,9 @@ void CreateSkeletalMeshFromAuthoring(TSharedPtr<FFractureSession> FractureSessio
 	IMeshBuilderModule& MeshBuilderModule = IMeshBuilderModule::GetForRunningPlatform();
 	//We must build the LODModel so we can restore properly the mesh, but we do not have to regenerate LODs
 	FSkeletalMeshBuildParameters SkeletalMeshBuildParameters(SkeletalMesh, GetTargetPlatformManagerRef().GetRunningTargetPlatform(), 0, false);
-	const bool bBuildSuccess = MeshBuilderModule.BuildSkeletalMesh(SkeletalMeshBuildParameters);
+	FSkeletalMeshRenderData* RenderData = SkeletalMesh->GetResourceForRendering();
+	check(RenderData != nullptr);
+	const bool bBuildSuccess = MeshBuilderModule.BuildSkeletalMesh(*RenderData, SkeletalMeshBuildParameters);
 	if (!bBuildSuccess)
 	{
 		SkeletalMesh->MarkAsGarbage();

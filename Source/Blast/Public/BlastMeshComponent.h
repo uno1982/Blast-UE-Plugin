@@ -882,6 +882,10 @@ public:
 	FBlastMeshSceneProxy(const UBlastMeshComponent* Component, FSkeletalMeshRenderData* InSkelMeshRenderData);
 	virtual ~FBlastMeshSceneProxy() {}
 
+#if !(UE_BUILD_SHIPPING || UE_BUILD_TEST)
+	UPhysicsAsset* PhysicsAssetForDebug;
+#endif
+
 	/**
 	* Render physics asset for debug display
 	*/
