@@ -295,38 +295,8 @@ void UBlastMeshComponent::InitBlastFamilyInternal(NvBlastAsset* LLBlastAsset)
 
 	DamageAccelerator = NvBlastExtDamageAcceleratorCreate(LLBlastAsset, 3);
 
-	// Create stress solver if enabled (right after actor created, but before 'StressSolver->notifyActorCreated()' call)
-#if !PLATFORM_ANDROID
-	// Note: Stress solver not available on Android (NvBlastExtStress library requires SSE intrinsics)
-	// Only create stress solver in game worlds (not during cooking or editor operations)
-	UWorld* World = GetWorld();
-	if (GetUsedStressProperties().bCalculateStress && World && World->IsGameWorld())
-	{
-		if (BlastFamily.IsValid() && BlastFamily.Get())
-		{
-			StressSolver = Nv::Blast::ExtStressSolver::create(*BlastFamily.Get());
-			if (StressSolver)
-			{
-				const float density = 0.000001f; // 1e-6 kg / cm3
-				// TODO: set each node according to its mass, volume and local transform with setNodeInfo
-				StressSolver->setAllNodesInfoFromLL(density);
-			}
-			else
-			{
-				UE_LOG(LogBlast, Error, TEXT("Failed to create Blast stress solver."));
-			}
-		}
-		else
-		{
-			UE_LOG(LogBlast, Error, TEXT("Cannot create stress solver: BlastFamily is not valid."));
-		}
-	}
-#else
-	if (GetUsedStressProperties().bCalculateStress)
-	{
-		UE_LOG(LogBlast, Warning, TEXT("Stress solver requested but not available on Android. Ignoring bCalculateStress setting."));
-	}
-#endif
+	// Note: Stress solver creation is deferred to first use (in TickStressSolver)
+	// to avoid race conditions with duplicated actors during PIE initialization
 }
 
 void UBlastMeshComponent::InitBlastFamily()
@@ -2981,6 +2951,22 @@ void UBlastMeshComponent::RefreshDynamicChunkBodyInstanceFromBodyInstance()
 #if !PLATFORM_ANDROID
 void UBlastMeshComponent::TickStressSolver()
 {
+	// Lazy initialization of stress solver on first tick to avoid race conditions during PIE initialization
+	if (!StressSolver && GetUsedStressProperties().bCalculateStress && BlastFamily.IsValid())
+	{
+		StressSolver = Nv::Blast::ExtStressSolver::create(*BlastFamily.Get());
+		if (StressSolver)
+		{
+			const float density = 0.000001f; // 1e-6 kg / cm3
+			StressSolver->setAllNodesInfoFromLL(density);
+		}
+		else
+		{
+			UE_LOG(LogBlast, Warning, TEXT("Failed to create Blast stress solver - stress features will be disabled."));
+			return; // Don't try again
+		}
+	}
+	
 	if (!StressSolver)
 	{
 		return;
