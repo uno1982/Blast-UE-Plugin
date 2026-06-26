@@ -641,6 +641,8 @@ public:
 	*/
 	virtual void PostEditImport() override;
 
+	virtual void PostLoad() override;
+
 	virtual class UBodySetup* GetBodySetup() override;
 	virtual FBodyInstance* GetBodyInstance(FName BoneName = NAME_None, bool bGetWelded = true, int32 Index = INDEX_NONE) const override;
 	virtual FBoxSphereBounds CalcBounds(const FTransform& LocalToWorld) const override;
