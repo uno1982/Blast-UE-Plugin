@@ -10,6 +10,7 @@ NVIDIA Blast destruction plugin for **Unreal Engine 5** with full Android ARM64 
 
 | UE Version | Branch | Status |
 |------------|--------|--------|
+| UE 5.8 | `5.8-android-support` | ✅ Full |
 | UE 5.7 | `5.7-android-support` | ✅ Full |
 | UE 5.5 | `UE5-android-support` | ✅ Full |
 | UE 5.4 | `5.4-android-support` | ✅ Full |
@@ -43,9 +44,9 @@ Android ARM64 is fully supported. All pre-built libraries are included.
 
 | Requirement | Version | Notes |
 |-------------|---------|-------|
-| NDK | r26b (26.1.10909125) | Required for UE 5.5 |
+| NDK | r26b (26.1.10909125) | Required for UE 5.5+ |
 | NDK API Level | android-29 | Minimum required |
-| JDK | Java 17 | Required for UE 5.5 Gradle |
+| JDK | Java 17 | Required for UE 5.5+ Gradle |
 
 Configure these in UE Project Settings > Platforms > Android SDK.
 
