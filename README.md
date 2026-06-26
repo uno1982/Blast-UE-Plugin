@@ -12,6 +12,7 @@ NVIDIA Blast destruction plugin for Unreal Engine.
 
 | Branch | UE Version | Platform Support |
 |--------|------------|------------------|
+| `5.8-android-support` | UE 5.8 | Windows, Linux, Android ARM64 |
 | `5.7-android-support` | UE 5.7 | Windows, Linux, Android ARM64 |
 | `5.5-android-support` | UE 5.5 | Windows, Linux, Android ARM64 |
 | `5.4-android-support` | UE 5.4 | Windows, Linux, Android ARM64 |
@@ -22,7 +23,7 @@ NVIDIA Blast destruction plugin for Unreal Engine.
 
 ```bash
 # Clone a specific branch
-git clone -b 5.4-android-support https://github.com/YOUR_REPO/Blast-UE-Plugin.git
+git clone -b 5.8-android-support https://github.com/YOUR_REPO/Blast-UE-Plugin.git
 ```
 
 Then copy to your project's `Plugins/` folder.
