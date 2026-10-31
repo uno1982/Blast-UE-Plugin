@@ -147,7 +147,7 @@ protected:
 	int32							OwningSupportStructureIndex;
 public:
 	// If true, this actor will start simulating as a kinematic physics body
-	UPROPERTY(VisibleAnywhere, Category = "Blast")
+	UPROPERTY(EditAnywhere, Category = "Blast")
 	bool							bIsInitiallyKinematic;
 
 	UPROPERTY(EditAnywhere, Category = "Blast")
